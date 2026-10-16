@@ -26,17 +26,41 @@ running NixOS, with both upstream cables connected to the same computer.
    access to the USB node without root.
 6. If anything misbehaves, power-cycle the switch (power and both USB-C cables).
 
-## Flow control (the open problem)
+## Flow control: strict turn-taking (verified)
 
-- With a long-lived RX pending on one end, TX from the other completes immediately and the packet arrives
-  byte-identical. **[verified, both directions, both modes]**
-- Each end's transport is a single serial pipe, so an end cannot hold an RX pending *and* send at the same time.
-- Polling with short receive windows does not work: in loopback, windows of 400 ms or less delivered **0 of 5** packets;
-  windows of 1 s or more delivered all of them, but slowly (about 1.6 s per packet).
-- The state byte did not show "data waiting" or "grant" bits during any of this, so we do not yet know how the vendor
-  software coordinates the two directions at speed.
+Each end's transport is one serial pipe, and the firmware enforces a request/response rhythm:
 
-See [design.md](design.md) for how the MVP deals with this.
+1. A **TX completes only after the peer's RX command has finished completely**, including the host reading that RX's
+   status block (CSW). A receiver must therefore read its CSW immediately after its data arrives.
+2. A TX command block is not accepted (the host's write times out) until the peer has an RX armed.
+3. **Strict alternation:** one end does *TX then RX*, the other does *RX then TX*. Any out-of-turn command (for example a
+   second RX with no TX in between) is refused. This state lives in the firmware and survives process exits, BOT resets and
+   USB device resets. It is cleared by completing the owed exchange (the owing end sends its reply while the other end has an RX
+   armed) or by power-cycling.
+4. A pending RX cannot be abandoned from the host: cancelling the transfer or doing a BOT reset does not free that end. Let the
+   firmware's own ~5.5 s idle stall expire (use host timeouts above 6 s), then reset and re-arm.
+5. Either physical end can take the "TX first" role; the `H`/`S` INQUIRY byte did not constrain who may initiate in our tests.
+
+**Master-driven polling works well:** the slave keeps an RX armed; the master sends, then arms an RX; the slave replies as soon
+as its RX completes and re-arms. In loopback: 200/200 round trips at about 477 per second, 2 ms latency (p95 2.1 ms).
+
+### Measured throughput (loopback, checksum-verified)
+
+| message size | echo (both directions combined) | one-way push with 2 KiB ack |
+|---|---|---|
+| 2 KiB | 2.0 MB/s | |
+| 8 KiB | 7.6 MB/s | |
+| 32 KiB | 28 MB/s | |
+| 64 KiB | 48 MB/s | 28 MB/s |
+| 128 KiB | 79 MB/s | |
+| 256 KiB | 106 MB/s | 61 MB/s |
+| 512 KiB | | 83 MB/s |
+| 1 MiB | | 101 MB/s |
+| 2 MiB | | 116 MB/s |
+
+Only transfers whose length equals the armed receive buffer were tested; shorter-than-buffer transfers are not verified yet.
+
+See [design.md](design.md) for the link design built on these rules.
 
 ## Notes on the vendor software
 

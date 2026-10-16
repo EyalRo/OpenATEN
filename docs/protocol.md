@@ -34,7 +34,7 @@ bytes 4-7 argument (length big-endian for tx/rx; byte 7 = length for hid/state)
 
 | Cmd | Name | Data | Notes |
 |---|---|---|---|
-| 0x00 | TX | out, N bytes | Send one packet to the peer. N = packet length (BE in bytes 4-7). **[verified]** Completes only if the peer has an RX pending. |
+| 0x00 | TX | out, N bytes | Send one packet to the peer. N = packet length (BE in bytes 4-7). **[verified]** Completes only after the peer's RX command (including its status block) has completed; see turn rules below. |
 | 0x01 | RX | in, N bytes | Receive one packet. Blocks until data arrives; the firmware stalls the pipe after ~5.5 s. **[verified]** |
 | 0x02 | HID | out, 5 or 8 bytes | Inject a mouse (5 B) or keyboard (8 B) report; it appears as an interrupt-IN report on the *peer's* HID interface. **[verified]** |
 | 0x04 | STATE | in, 1 byte | Link state byte, see below. **[verified: reads; bit meanings inferred]** |
@@ -81,6 +81,11 @@ All control packets are 2048 bytes, little-endian, zero padded. **[verified roun
 | 0x88 | Data chunk | stream payload, larger than 2 KiB allowed **[inferred]** |
 | 0x42 / 0x43 | Paste files / abort files | +0x10 u8 flag **[inferred]** |
 | 0x85 | Response | +0x0D status, +0x10 u32 acknowledged id **[inferred]** |
+
+## Turn rules (verified)
+
+One end does TX then RX, the other RX then TX; out-of-turn commands are refused until the owed exchange is completed. A receiver must read the status block of its RX immediately.
+Details and measurements: [hardware.md](hardware.md#flow-control-strict-turn-taking-verified). Transfers up to 2 MiB per command were verified.
 
 ## HID reports
 
