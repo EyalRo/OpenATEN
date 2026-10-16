@@ -1,0 +1,3 @@
+# Give the logged-in user access to the Genesys Logic host-bridge function (needed for libusb access without root).
+# The number must be below 73 so that systemd's "uaccess" tag is applied (73-seat-late.rules).
+SUBSYSTEM=="usb", ATTR{idVendor}=="05e3", ATTR{idProduct}=="0627", TAG+="uaccess"
