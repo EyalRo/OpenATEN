@@ -33,6 +33,7 @@ openaten list               # shows the bridge ends and their USB port paths
 openaten state              # role (H/S) and link state of each end
 openaten loopback -n 5      # packet round-trip between the two ends on this host
 openaten hid                # HID injection round-trip between the two ends
+openaten link --mib 64      # link-layer self-test: messages both ways + 64 MiB each way, checksum-verified
 ```
 
 `loopback` and `hid` are the hardware self-tests. If either hangs or fails, see the rules in [hardware.md](hardware.md) and

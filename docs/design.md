@@ -50,7 +50,8 @@ progress and cancel, using large frames to reach tens of MB/s.
 
 1. [done] Transport, packet builders, unit tests, loopback and HID self-tests.
 2. [done] Flow-control research: turn rules, polling, throughput (hardware.md).
-3. Link layer with resync and tests against a fake transport that models the turn rules.
+3. [done] Link layer (`openaten.link`): framing with CRC and announced next-frame lengths, chunked messages up to any size, master/slave loops,
+   self-resync, tests against a fake transport that models the turn rules, `openaten link` hardware self-test; survives SIGKILL of either side mid-transfer.
 4. Input forwarding (Linux sender first).
 5. Clipboard (Wayland and X11), then files.
 6. Second client for the other computer (Linux first; Windows needs SCSI pass-through instead of libusb).

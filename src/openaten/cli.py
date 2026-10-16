@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import threading
 import time
@@ -10,12 +11,20 @@ import usb.core
 import usb.util
 
 from . import protocol as pr
+from .link import LinkSession, UsbTransport
 from .usb import BridgeEnd, find_ends, port_path
 
 
+_OPENED: list[BridgeEnd] = []
+_STUCK_THREADS: list[bool] = []  # set if a link thread is still blocked inside libusb
+
+
 def _open_all() -> list[BridgeEnd]:
-    ends = [BridgeEnd(d) for d in find_ends()]
-    return sorted(ends, key=lambda e: port_path(e.dev))
+    """Open every bridge end, ordered by (bus, port path). They are closed when the command finishes."""
+    ends = sorted(find_ends(), key=lambda d: (d.bus, port_path(d)))
+    opened = [BridgeEnd(d) for d in ends]
+    _OPENED.extend(opened)
+    return opened
 
 
 def cmd_list(_args) -> int:
@@ -76,6 +85,53 @@ def cmd_loopback(args) -> int:
     return 0 if ok == args.count else 2
 
 
+def cmd_link(args) -> int:
+    """Run both link roles over the two ends on this host: messages both ways plus a large transfer."""
+    import hashlib
+    import os
+
+    ends = _open_all()
+    if len(ends) < 2:
+        print("need two bridge ends")
+        return 1
+    got: dict[str, list] = {"master": [], "slave": []}
+    done = {"master": threading.Event(), "slave": threading.Event()}
+    want = {"master": 2, "slave": 2}
+
+    def collector(name):
+        def on_message(channel, msg_id, data):
+            got[name].append((channel, hashlib.sha256(data).hexdigest(), len(data)))
+            if len(got[name]) >= want[name]:
+                done[name].set()
+        return on_message
+
+    errors: list = []
+    master = LinkSession(UsbTransport(ends[0]), True, collector("master"), poll_idle=0.02, on_error=errors.append)
+    slave = LinkSession(UsbTransport(ends[1]), False, collector("slave"), poll_idle=0.02, on_error=errors.append)
+    slave.start()
+    master.start()
+    big = os.urandom(args.mib << 20)
+    small_m, small_s = b"hello from master", b"hello from slave"
+    t0 = time.time()
+    master.send_message(1, small_m)
+    slave.send_message(1, small_s)
+    master.send_message(2, big)
+    slave.send_message(2, big)
+    ok = all(done[n].wait(60) for n in done)
+    dt = time.time() - t0
+    stopped = master.stop() & slave.stop()
+    if not stopped:
+        _STUCK_THREADS.append(True)
+    expect = {(1, hashlib.sha256(small_s).hexdigest(), len(small_s)), (2, hashlib.sha256(big).hexdigest(), len(big))}
+    expect_s = {(1, hashlib.sha256(small_m).hexdigest(), len(small_m)), (2, hashlib.sha256(big).hexdigest(), len(big))}
+    intact = set(got["master"]) == expect and set(got["slave"]) == expect_s
+    moved = 2 * len(big) / 1e6
+    print(f"delivered={ok} intact={intact} errors={errors} in {dt:.2f}s ({moved / dt:.1f} MB/s both directions combined)")
+    print("master", master.stats)
+    print("slave ", slave.stats)
+    return 0 if ok and intact and not errors else 2
+
+
 def cmd_hid(_args) -> int:
     """Inject mouse/keyboard reports on one end and read them back from the other end's HID interface."""
     ends = _open_all()
@@ -121,9 +177,22 @@ def main(argv: list[str] | None = None) -> int:
     lb = sub.add_parser("loopback", help="packet round-trip test between two ends on this host")
     lb.add_argument("-n", "--count", type=int, default=5)
     lb.set_defaults(fn=cmd_loopback)
+    lk = sub.add_parser("link", help="link-layer self-test (messages both ways + bulk) between two ends on this host")
+    lk.add_argument("--mib", type=int, default=8, help="size of the bulk message in MiB (each direction)")
+    lk.set_defaults(fn=cmd_link)
     sub.add_parser("hid", help="HID injection round-trip test between two ends on this host").set_defaults(fn=cmd_hid)
     args = ap.parse_args(argv)
-    return args.fn(args)
+    try:
+        rc = args.fn(args)
+    finally:
+        if not _STUCK_THREADS:
+            for end in _OPENED:
+                end.close()
+    if _STUCK_THREADS:
+        # A thread is blocked inside libusb; tearing libusb down now would crash, so leave without cleanup.
+        sys.stdout.flush()
+        os._exit(rc)
+    return rc
 
 
 if __name__ == "__main__":

@@ -66,20 +66,27 @@ class BridgeEnd:
             pass
 
     def close(self) -> None:
+        """Release the interface (and re-attach the kernel driver only if asked to) and free libusb resources."""
         try:
             usb.util.release_interface(self.dev, self.ifnum)
             if self._reattach:
                 self.dev.attach_kernel_driver(self.ifnum)
         except usb.core.USBError:
             pass
+        usb.util.dispose_resources(self.dev)
 
     # -- bulk-only transport ----------------------------------------------------------
-    def cmd(self, cb: bytes, data_in: int = 0, data_out: bytes = b"", timeout: int = 3000) -> tuple[int, bytes]:
-        """Run one command; returns (csw_status, data_in_bytes). Raises usb.core.USBError on stall/timeout."""
+    def cmd(self, cb: bytes, data_in: int = 0, data_out: bytes = b"", timeout: int = 3000,
+            cbw_timeout: int | None = None) -> tuple[int, bytes]:
+        """Run one command; returns (csw_status, data_in_bytes). Raises usb.core.USBError on stall/timeout.
+
+        ``cbw_timeout`` bounds how long the command block itself may be refused (the firmware refuses out-of-turn
+        commands); it defaults to ``timeout``.
+        """
         tag, self._tag = self._tag, self._tag + 1
         length = data_in or len(data_out)
         cbw = struct.pack("<4sIIBBB", b"USBC", tag, length, 0x80 if data_in else 0, 0, len(cb)) + cb.ljust(16, b"\0")
-        self.ep_out.write(cbw, timeout)
+        self.ep_out.write(cbw, timeout if cbw_timeout is None else cbw_timeout)
         data = b""
         if data_in:
             data = bytes(self.ep_in.read(data_in, timeout))
@@ -102,13 +109,17 @@ class BridgeEnd:
     def init(self) -> int:
         return self.cmd(pr.cdb(pr.CMD_INIT))[0]
 
-    def send(self, packet: bytes, timeout: int = 3000) -> None:
-        """Send one packet. Only completes if the peer has a receive pending (see docs/hardware.md)."""
-        self.cmd(pr.cdb_tx(len(packet)), data_out=packet, timeout=timeout)
+    def send(self, packet: bytes, timeout: int = 3000, cbw_timeout: int = 1000) -> None:
+        """Send one message. Only accepted when it is our turn and the peer has a receive of the same length armed."""
+        self.cmd(pr.cdb_tx(len(packet)), data_out=packet, timeout=timeout, cbw_timeout=min(cbw_timeout, timeout))
 
-    def recv(self, timeout: int = 5000) -> bytes:
-        """Wait for one packet. Times out (and needs reset()) if the peer sends nothing."""
-        return self.cmd(pr.cdb_rx(), data_in=pr.PKT_LEN, timeout=timeout)[1]
+    def recv(self, size: int = pr.PKT_LEN, timeout: int = 8000, cbw_timeout: int = 1000) -> bytes:
+        """Wait for one message of up to `size` bytes.
+
+        The firmware stalls an idle receive after ~5.5 s, so keep `timeout` above that: letting the firmware time out first
+        leaves a clean stall that reset() clears, whereas a host-side cancel leaves the end stuck (see docs/hardware.md).
+        """
+        return self.cmd(pr.cdb_rx(size), data_in=size, timeout=timeout, cbw_timeout=min(cbw_timeout, timeout))[1]
 
     def hid(self, report: bytes) -> None:
         """Inject a mouse (5 B) or keyboard (8 B) report; it appears on the peer's HID interface."""

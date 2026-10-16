@@ -8,9 +8,9 @@ private link between the two computers, which the vendor's software ("BEZEL X") 
 clipboard sharing and file transfer, and which only works on Windows and macOS. OpenATEN documents that link and aims to
 provide the same features on Linux, **without the network**, so they keep working with a VPN up.
 
-> **Status: experimental research code (v0.1).** The transport works on real hardware in loopback: packets cross the
-> bridge byte-for-byte in both directions, and keyboard/mouse reports injected on one end arrive on the other.
-> The cross-screen, clipboard and file-transfer applications are **not built yet**. Interoperability with the vendor's
+> **Status: experimental research code (v0.1).** The transport and a reliable message link work on real hardware in loopback:
+> messages flow both ways at ~75-90 MB/s, survive process crashes (self-resync), and keyboard/mouse reports injected on one end
+> arrive on the other. The cross-screen, clipboard and file-transfer applications are **not built yet** (they sit on the link). Interoperability with the vendor's
 > own software has **not** been demonstrated. Read [docs/hardware.md](docs/hardware.md) before running anything: a few
 > command patterns can wedge the switch's firmware until it is power-cycled.
 
@@ -20,6 +20,7 @@ provide the same features on Linux, **without the network**, so they keep workin
 |---|---|
 | Discover the bridge ends and their master/slave roles | `openaten list`, `openaten state` |
 | Packet round-trip between the two ends (both on one host) | `openaten loopback` |
+| Reliable messaging link (framing, CRC, chunking, polling, auto-resync) | `openaten link --mib 64` |
 | Keyboard/mouse injection onto the other end's HID interface | `openaten hid` |
 | Documented command and packet formats | [docs/protocol.md](docs/protocol.md) |
 
@@ -37,8 +38,8 @@ The bridge device only appears when both upstream ports are connected.
 
 ## Plan
 
-See [docs/design.md](docs/design.md). In short: keep the verified data channel and HID injection, design our own framed
-messaging on top (turn-taking, because each end's pipe is serial), then build input forwarding, clipboard and files.
+See [docs/design.md](docs/design.md). The link layer (master-driven polling over the firmware's strict turn-taking) is done and
+hardware-tested; input forwarding, clipboard and file transfer are next. Work items are tracked in the GitHub issues, and findings live in the wiki.
 
 ## Disclaimer
 
