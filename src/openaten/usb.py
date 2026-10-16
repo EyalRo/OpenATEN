@@ -99,12 +99,33 @@ class BridgeEnd:
         raise usb.core.USBError("no matching CSW")
 
     # -- bridge commands --------------------------------------------------------------
+    def simple(self, cb: bytes, data_in: int = 0, data_out: bytes = b"", timeout: int = 1500) -> tuple[int, bytes]:
+        """Run a stand-alone command (state, INQUIRY, HID). If the firmware refuses it, reset the transport and try once more.
+
+        After a link session an end can be left in a state where its first stand-alone command is refused; the failed
+        command plus a bulk-only reset clears it (see docs/hardware.md).
+        """
+        for attempt in range(3):
+            try:
+                return self.cmd(cb, data_in=data_in, data_out=data_out, timeout=timeout, cbw_timeout=timeout)
+            except usb.core.USBError:
+                if attempt == 2:
+                    raise
+                self.reset()
+                time.sleep(0.05)
+                if attempt == 1 and data_in:
+                    # An end that last received refuses another data-in command until it has issued a non-data one.
+                    try:
+                        self.cmd(pr.cdb(pr.CMD_INIT), timeout=timeout, cbw_timeout=timeout)
+                    except usb.core.USBError:
+                        self.reset()
+
     def state(self) -> int:
-        return self.cmd(pr.cdb_state(), data_in=1)[1][0]
+        return self.simple(pr.cdb_state(), data_in=1)[1][0]
 
     def inquiry(self, length: int = 0x34) -> bytes:
         """Standard INQUIRY. In CD-ROM mode, 0x34 bytes include the vendor bytes (see docs/hardware.md)."""
-        return self.cmd(bytes([0x12, 0, 0, 0, length, 0]), data_in=length)[1]
+        return self.simple(bytes([0x12, 0, 0, 0, length, 0]), data_in=length)[1]
 
     def init(self) -> int:
         return self.cmd(pr.cdb(pr.CMD_INIT))[0]
@@ -122,8 +143,12 @@ class BridgeEnd:
         return self.cmd(pr.cdb_rx(size), data_in=size, timeout=timeout, cbw_timeout=min(cbw_timeout, timeout))[1]
 
     def hid(self, report: bytes) -> None:
-        """Inject a mouse (5 B) or keyboard (8 B) report; it appears on the peer's HID interface."""
-        self.cmd(pr.cdb_hid(len(report)), data_out=report)
+        """Inject a mouse (5 B) or keyboard (8 B) report; it appears on the peer's HID interface.
+
+        The peer's HID interrupt endpoint must be polled by something (an OS driver with an open input device); otherwise the
+        firmware refuses further injections once its small buffer is full.
+        """
+        self.simple(pr.cdb_hid(len(report)), data_out=report)
 
     def role(self) -> str | None:
         """'H' (master) or 'S' (slave), from the vendor INQUIRY bytes. Only available in CD-ROM mode."""

@@ -132,6 +132,25 @@ def cmd_link(args) -> int:
     return 0 if ok and intact and not errors else 2
 
 
+def cmd_forward(args) -> int:
+    """Forward this computer's keyboard and mouse to the other computer (needs read access to /dev/input)."""
+    from .forward import run_evdev
+
+    ends = _open_all()
+    if args.port:
+        ends = [e for e in ends if port_path(e.dev) == args.port]
+    if not ends:
+        print("no bridge end found (see `openaten list`)")
+        return 1
+    end = ends[0]
+    print(f"injecting through the end on port {port_path(end.dev)}")
+    try:
+        return run_evdev(end.hid, args.hotkey, dry_run=args.dry_run, max_active=args.max_active or None)
+    except ImportError:
+        print("python-evdev is required: pip install evdev")
+        return 1
+
+
 def cmd_hid(_args) -> int:
     """Inject mouse/keyboard reports on one end and read them back from the other end's HID interface."""
     ends = _open_all()
@@ -141,27 +160,35 @@ def cmd_hid(_args) -> int:
     src, dst = ends[0], ends[1]
     cfg = dst.dev.get_active_configuration()
     hid = next(i for i in cfg if i.bInterfaceClass == 3)
-    if dst.dev.is_kernel_driver_active(hid.bInterfaceNumber):
-        dst.dev.detach_kernel_driver(hid.bInterfaceNumber)  # keep the test input off the real desktop
-    usb.util.claim_interface(dst.dev, hid.bInterfaceNumber)
-    ep = next(e for e in hid if usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN)
-    reports = [pr.mouse_report(dx=5), pr.mouse_report(), pr.key_report(0, 0x04), pr.key_report()]
-    got: list = []
+    hid_if = hid.bInterfaceNumber
+    had_driver = dst.dev.is_kernel_driver_active(hid_if)
+    if had_driver:
+        dst.dev.detach_kernel_driver(hid_if)  # keep the test input off the real desktop
+    usb.util.claim_interface(dst.dev, hid_if)
+    try:
+        ep = next(e for e in hid if usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN)
+        reports = [pr.mouse_report(dx=5), pr.mouse_report(), pr.key_report(0, 0x04), pr.key_report()]
+        got: list = []
 
-    def reader():
-        try:
-            for _ in reports:
-                got.append(bytes(dst.dev.read(ep.bEndpointAddress, 64, 1500)))
-        except usb.core.USBError as e:
-            got.append(str(e))
+        def reader():
+            try:
+                for _ in reports:
+                    got.append(bytes(dst.dev.read(ep.bEndpointAddress, 64, 1500)))
+            except usb.core.USBError as e:
+                got.append(str(e))
 
-    th = threading.Thread(target=reader)
-    th.start()
-    time.sleep(0.2)
-    for r in reports:
-        src.hid(r)
-        time.sleep(0.1)
-    th.join()
+        th = threading.Thread(target=reader)
+        th.start()
+        time.sleep(0.2)
+        for r in reports:
+            src.hid(r)
+            time.sleep(0.1)
+        th.join()
+    finally:
+        # Put the kernel HID driver back: with nothing polling the interrupt endpoint the firmware refuses further injections.
+        usb.util.release_interface(dst.dev, hid_if)
+        if had_driver:
+            dst.dev.attach_kernel_driver(hid_if)
     ok = got == reports
     print("sent    :", [r.hex(" ") for r in reports])
     print("received:", [g.hex(" ") if isinstance(g, bytes) else g for g in got])
@@ -180,6 +207,12 @@ def main(argv: list[str] | None = None) -> int:
     lk = sub.add_parser("link", help="link-layer self-test (messages both ways + bulk) between two ends on this host")
     lk.add_argument("--mib", type=int, default=8, help="size of the bulk message in MiB (each direction)")
     lk.set_defaults(fn=cmd_link)
+    fw = sub.add_parser("forward", help="forward this computer's keyboard/mouse to the other computer (hotkey toggles)")
+    fw.add_argument("--port", help="USB port path of the end to inject through (default: first end)")
+    fw.add_argument("--hotkey", default="ctrl+alt+scrolllock", help="chord that toggles forwarding")
+    fw.add_argument("--dry-run", action="store_true", help="print the reports instead of grabbing devices and injecting")
+    fw.add_argument("--max-active", type=float, default=0, help="safety: return control after this many seconds (0 = never)")
+    fw.set_defaults(fn=cmd_forward)
     sub.add_parser("hid", help="HID injection round-trip test between two ends on this host").set_defaults(fn=cmd_hid)
     args = ap.parse_args(argv)
     try:

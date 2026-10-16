@@ -14,6 +14,8 @@ class FakeEnd:
         self.armed: int | None = None
         self.inbox: bytes | None = None
         self.peer: "FakeEnd"
+        self.hid_in: list[bytes] = []  # HID reports injected on this end by the peer
+        self.hid_times: list[float] = []
 
     def send(self, data: bytes, timeout: float) -> None:
         b = self.bridge
@@ -54,6 +56,11 @@ class FakeEnd:
             data, self.inbox = self.inbox, None
             b.cond.notify_all()
             return data
+
+    def hid(self, report: bytes, timeout: float) -> None:
+        with self.bridge.cond:
+            self.peer.hid_in.append(bytes(report))
+            self.peer.hid_times.append(time.monotonic())
 
     def reset(self) -> None:
         with self.bridge.cond:

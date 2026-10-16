@@ -13,6 +13,7 @@ dependencies = ["pyusb>=1.2"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
+forward = ["evdev"]
 
 [project.scripts]
 openaten = "openaten.cli:main"

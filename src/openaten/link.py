@@ -24,6 +24,7 @@ MAGIC = b"OATN"
 VERSION = 1
 KIND_POLL = 0  # empty frame (poll / keep-alive / empty reply)
 KIND_DATA = 1  # carries one chunk of a message
+FLAG_WANT_POLL = 1  # sender has more to say: poll again immediately
 _HDR = struct.Struct("<4sBBHIIIIIIII")  # magic ver kind flags seq ack next_len channel msg_id offset total plen
 _OVERHEAD = _HDR.size + 4  # header + crc32
 MAX_FRAME = 1 << 20  # 1 MiB frames (the hardware handled 2 MiB in tests)
@@ -46,6 +47,7 @@ class Transport(Protocol):
     def send(self, data: bytes, timeout: float) -> None: ...
     def recv(self, size: int, timeout: float) -> bytes: ...
     def reset(self) -> None: ...
+    def hid(self, report: bytes, timeout: float) -> None: ...  # optional: inject a HID report on the peer
 
 
 def wire_len(payload_len: int) -> int:
@@ -56,6 +58,7 @@ def wire_len(payload_len: int) -> int:
 @dataclass
 class Frame:
     kind: int = KIND_POLL
+    flags: int = 0
     seq: int = 0
     ack: int = 0
     next_len: int = SLOT  # wire length of the sender's next frame
@@ -70,7 +73,7 @@ class Frame:
         length = need if length is None else length
         if length < need or length % SLOT:
             raise ValueError(f"frame needs {need} bytes, wire length is {length}")
-        hdr = _HDR.pack(MAGIC, VERSION, self.kind, 0, self.seq, self.ack, self.next_len, self.channel,
+        hdr = _HDR.pack(MAGIC, VERSION, self.kind, self.flags, self.seq, self.ack, self.next_len, self.channel,
                         self.msg_id, self.offset, self.total, len(self.payload))
         crc = zlib.crc32(self.payload, zlib.crc32(hdr))
         return (hdr + struct.pack("<I", crc) + self.payload).ljust(length, b"\0")
@@ -79,14 +82,14 @@ class Frame:
     def decode(data: bytes) -> "Frame":
         if len(data) < _OVERHEAD:
             raise ValueError("short frame")
-        magic, ver, kind, _flags, seq, ack, next_len, channel, msg_id, offset, total, plen = _HDR.unpack_from(data)
+        magic, ver, kind, flags, seq, ack, next_len, channel, msg_id, offset, total, plen = _HDR.unpack_from(data)
         if magic != MAGIC or ver != VERSION:
             raise ValueError("not an OpenATEN frame")
         (crc,) = struct.unpack_from("<I", data, _HDR.size)
         payload = bytes(data[_OVERHEAD : _OVERHEAD + plen])
         if len(payload) != plen or zlib.crc32(payload, zlib.crc32(data[: _HDR.size])) != crc:
             raise ValueError("bad checksum")
-        return Frame(kind, seq, ack, next_len, channel, msg_id, offset, total, payload)
+        return Frame(kind, flags, seq, ack, next_len, channel, msg_id, offset, total, payload)
 
 
 @dataclass
@@ -114,13 +117,17 @@ class LinkSession:
         poll_idle: float = 0.25,
         io_timeout: float = 8.0,
         send_timeout: float = 1.0,
+        hid_active_window: float = 0.25,
         on_error: Callable[[Exception], None] | None = None,
     ):
         self.t, self.master = transport, master
         self.on_message = on_message or (lambda channel, msg_id, data: None)
         self.on_error = on_error or (lambda e: None)
         self.poll_idle, self.io_timeout, self.send_timeout = poll_idle, io_timeout, send_timeout
+        self.hid_active_window = hid_active_window
         self._chunks: deque[_Chunk] = deque()
+        self._hid: deque[bytes] = deque()
+        self._hid_active_until = 0.0  # keep the peer polling fast while input is flowing
         self._msg_id = 0
         self._id_lock = threading.Lock()
         self._seq = 0
@@ -131,7 +138,7 @@ class LinkSession:
         self._peer_busy = False
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self.stats = dict(frames_tx=0, frames_rx=0, resyncs=0, bytes_tx=0, bytes_rx=0, bad_frames=0)
+        self.stats = dict(frames_tx=0, frames_rx=0, resyncs=0, bytes_tx=0, bytes_rx=0, bad_frames=0, hid_sent=0, hid_errors=0)
 
     # ---- public API ------------------------------------------------------------------
     def start(self) -> None:
@@ -147,7 +154,12 @@ class LinkSession:
         return True
 
     def idle(self) -> bool:
-        return not self._chunks and not self._peer_busy
+        return not self._chunks and not self._hid and not self._peer_busy
+
+    def inject_hid(self, report: bytes) -> None:
+        """Queue a mouse (5 B) or keyboard (8 B) report for injection on the peer; sent between exchanges."""
+        self._hid.append(bytes(report))
+        self._hid_active_until = time.monotonic() + self.hid_active_window
 
     def send_message(self, channel: int, data: bytes) -> int:
         """Queue a message (any size). Returns its message id."""
@@ -168,12 +180,14 @@ class LinkSession:
         carried = None
         if chunk is not None and wire_len(len(chunk.payload)) <= self._tx_len:
             carried = self._chunks.popleft()
-            frame = Frame(KIND_DATA, self._seq, self._ack, SLOT, carried.channel, carried.msg_id, carried.offset,
+            frame = Frame(KIND_DATA, 0, self._seq, self._ack, SLOT, carried.channel, carried.msg_id, carried.offset,
                           carried.total, carried.payload)
         else:
             frame = Frame(KIND_POLL, self._seq, self._ack)
         nxt = self._chunks[0] if self._chunks else None
         frame.next_len = wire_len(len(nxt.payload)) if nxt is not None else SLOT
+        if nxt is not None or self._hid or time.monotonic() < self._hid_active_until:
+            frame.flags |= FLAG_WANT_POLL
         return frame, self._tx_len, carried
 
     def _sent(self, frame: Frame) -> None:
@@ -196,7 +210,7 @@ class LinkSession:
         self.stats["frames_rx"] += 1
         self._rx_len = f.next_len
         self._ack = f.seq + 1
-        self._peer_busy = f.kind == KIND_DATA or f.next_len != SLOT
+        self._peer_busy = f.kind == KIND_DATA or f.next_len != SLOT or bool(f.flags & FLAG_WANT_POLL)
         if f.kind == KIND_DATA:
             self._deliver(f)
         return f
@@ -221,6 +235,19 @@ class LinkSession:
         except Exception as e:  # reported to the owner; the loop ends
             self.on_error(e)
 
+    def _flush_hid(self) -> None:
+        """Inject queued HID reports. They are separate commands and may run between any two exchanges."""
+        hid = getattr(self.t, "hid", None)
+        while self._hid and hid is not None:
+            report = self._hid.popleft()
+            try:
+                hid(report, timeout=self.send_timeout)
+                self.stats["hid_sent"] += 1
+            except TransportError:
+                self.stats["hid_errors"] += 1
+                self.t.reset()
+                break
+
     def _resync(self) -> None:
         """Forget announced lengths and clear the pipe; the peer does the same when its own transfers fail."""
         self.stats["resyncs"] += 1
@@ -242,6 +269,7 @@ class LinkSession:
         return None
 
     def _master_step(self) -> None:
+        self._flush_hid()
         frame, length, carried = self._build()
         try:
             self.t.send(frame.encode(length), timeout=self.send_timeout)  # refused quickly when out of turn
@@ -253,7 +281,7 @@ class LinkSession:
         self._sent(frame)
         if self._recv_frame() is None:
             time.sleep(0.05)
-        elif self.idle():
+        elif self.idle() and time.monotonic() >= self._hid_active_until:
             self._stop.wait(self.poll_idle)
 
     def _slave_step(self) -> None:
@@ -271,6 +299,7 @@ class LinkSession:
             self._resync()
             return
         if self._accept(data) is not None:
+            self._flush_hid()
             self._reply()
         else:
             self.t.reset()
@@ -303,6 +332,12 @@ class UsbTransport:
     def recv(self, size: int, timeout: float) -> bytes:
         try:
             return self.end.recv(size, timeout=int(timeout * 1000))
+        except self._usb.USBError as e:
+            raise self._map(e) from e
+
+    def hid(self, report: bytes, timeout: float) -> None:
+        try:
+            self.end.hid(report)
         except self._usb.USBError as e:
             raise self._map(e) from e
 

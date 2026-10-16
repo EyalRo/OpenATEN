@@ -38,3 +38,19 @@ openaten link --mib 64      # link-layer self-test: messages both ways + 64 MiB 
 
 `loopback` and `hid` are the hardware self-tests. If either hangs or fails, see the rules in [hardware.md](hardware.md) and
 power-cycle the switch.
+
+## Input forwarding (keyboard and mouse to the other computer)
+
+```sh
+pip install evdev                                  # or: nix develop (includes it)
+openaten forward --dry-run                         # prints the HID reports; nothing is grabbed or injected
+openaten forward --max-active 600                  # real run; ctrl+alt+scrolllock toggles; auto-returns control after 10 min
+```
+
+Reading and grabbing keyboards and mice needs access to `/dev/input/event*`: add your user to the `input` group
+(NixOS: `users.users.<name>.extraGroups = [ "input" ];`). While forwarding is on the local devices are grabbed, so nothing reaches
+this desktop; toggling off (or any exit) releases the grab and releases every key/button on the other computer. The other
+computer needs no OpenATEN software for this: it sees an ordinary USB keyboard and mouse.
+
+Also recommended: stop the kernel from probing the bridge's storage function (see [hardware.md](hardware.md)):
+`boot.kernelParams = [ "usb-storage.quirks=05e3:0627:i" ];` on NixOS.

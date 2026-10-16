@@ -8,7 +8,7 @@
     in {
       devShells = forAll (pkgs: {
         default = pkgs.mkShell {
-          packages = [ (pkgs.python3.withPackages (p: [ p.pyusb p.pytest ])) pkgs.libusb1 ];
+          packages = [ (pkgs.python3.withPackages (p: [ p.pyusb p.pytest p.evdev ])) pkgs.libusb1 ];
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.libusb1 ];
           PYTHONPATH = "src";
         };

@@ -10,7 +10,7 @@ from openaten.link import Frame, LinkSession, SLOT, wire_len
 
 
 def test_frame_roundtrip():
-    f = Frame(link.KIND_DATA, 7, 3, 4096, 2, 9, 0, 5, b"hello")
+    f = Frame(link.KIND_DATA, 0, 7, 3, 4096, 2, 9, 0, 5, b"hello")
     raw = f.encode()
     assert len(raw) == SLOT
     g = Frame.decode(raw)
@@ -126,3 +126,35 @@ def test_stats_count_traffic():
         p.master.send_message(1, b"abc")
         p.wait("s", 1)
     assert p.master.stats["frames_tx"] >= 1 and p.slave.stats["bytes_rx"] == 3
+
+
+def test_hid_reports_flow_both_ways_in_order():
+    with Pair() as p:
+        for i in range(20):
+            p.master.inject_hid(bytes([0, i, 0, 0, 0]))
+            p.slave.inject_hid(bytes([0, 100 + i, 0, 0, 0]))
+        t0 = time.time()
+        while (len(p.bridge.b.hid_in) < 20 or len(p.bridge.a.hid_in) < 20) and time.time() - t0 < 10:
+            time.sleep(0.01)
+    assert [r[1] for r in p.bridge.b.hid_in] == list(range(20))  # master -> slave side
+    assert [r[1] for r in p.bridge.a.hid_in] == [100 + i for i in range(20)]  # slave -> master side
+    assert p.master.stats["hid_sent"] == 20 and p.slave.stats["hid_sent"] == 20
+
+
+def test_slave_input_stream_is_polled_quickly_while_active():
+    """The master cannot know the slave has input until a poll; the want-poll flag then keeps polling fast."""
+    with Pair() as p:
+        p.master.poll_idle = 0.3
+        time.sleep(0.4)
+        sent = []
+        for i in range(60):  # a 300 ms burst of mouse movement on the slave side
+            sent.append(time.monotonic())
+            p.slave.inject_hid(bytes([0, i % 100, 0, 0, 0]))
+            time.sleep(0.005)
+        t0 = time.time()
+        while len(p.bridge.a.hid_in) < 60 and time.time() - t0 < 5:
+            time.sleep(0.01)
+    assert len(p.bridge.a.hid_in) == 60
+    delays = [arr - snt for arr, snt in zip(p.bridge.a.hid_times, sent)]
+    # the first report may wait for one idle poll; everything after the burst is flowing must be well under the idle period
+    assert max(delays[10:]) < 0.15, max(delays[10:])

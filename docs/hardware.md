@@ -22,9 +22,16 @@ running NixOS, with both upstream cables connected to the same computer.
 3. **Issue a bulk-only reset (class request 0xFF) and clear both halts after any failed or timed-out transfer.**
 4. **`SWITCH` (0x07) re-enumerates both ends at once** and flips the LUN between CD-ROM and disk mode. Ports keep their
    path (e.g. `1.2`, `2`) but get new device addresses; find ends by port path, not address.
-5. A udev rule numbered below 73 (see `udev/70-openaten.rules`) is needed for the `uaccess` tag to give your user
+5. **Tell the kernel to ignore the bridge's mass-storage function** with `usb-storage.quirks=05e3:0627:i` (kernel parameter, or at
+   runtime via `/sys/module/usb_storage/parameters/quirks`). Otherwise every time a process releases an end, the kernel rebinds
+   `usb-storage` and scans the firmware with its own commands; symptoms are a first stand-alone command that is refused after a
+   session, and (worse) wedged firmware.
+6. **The peer's HID interface must be polled.** HID injection only works while something polls the receiving end's interrupt
+   endpoint (an OS driver with an input device open). If a test tool detaches `usbhid` and exits without re-attaching it, further
+   injections are refused. `openaten hid` restores the driver when it finishes.
+7. A udev rule numbered below 73 (see `udev/70-openaten.rules`) is needed for the `uaccess` tag to give your user
    access to the USB node without root.
-6. If anything misbehaves, power-cycle the switch (power and both USB-C cables).
+8. If anything misbehaves, power-cycle the switch (power and both USB-C cables).
 
 ## Flow control: strict turn-taking (verified)
 
