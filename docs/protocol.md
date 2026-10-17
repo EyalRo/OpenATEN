@@ -14,6 +14,8 @@ device (`05e3:0627`, "USB Storage") with two interfaces:
 | 0 | Mass storage (bulk-only) | Vendor SCSI commands (opcode `0xF2`): data channel, state, control |
 | 1 | HID (mouse + keyboard, one interrupt-IN endpoint) | Receives keyboard/mouse reports injected by the other computer |
 
+![ATEN US3342 overview: host-visible USB devices, how OpenATEN uses the bridge (SCSI 0xF2 over bulk-only transport plus the HID interface), and the features carried on top](images/us3342-bridge-overview.webp)
+
 The bridge only enumerates when **both** upstream ports are connected to a live host. Connecting both ports to the
 same computer works as a loopback and is the easiest way to develop.
 

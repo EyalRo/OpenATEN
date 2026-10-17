@@ -8,6 +8,8 @@ private link between the two computers, which the vendor's software ("BEZEL X") 
 clipboard sharing and file transfer, and which only works on Windows and macOS. OpenATEN documents that link and aims to
 provide the same features on Linux, **without the network**, so they keep working with a VPN up.
 
+![ATEN US3342 overview: host-visible USB devices, how OpenATEN uses the bridge (SCSI 0xF2 over bulk-only transport plus the HID interface), and the features carried on top](docs/images/us3342-bridge-overview.webp)
+
 > **Status: experimental research code (v0.1).** The transport and a reliable message link work on real hardware in loopback:
 > messages flow both ways at ~75-90 MB/s, survive process crashes (self-resync), and keyboard/mouse reports injected on one end
 > arrive on the other. The cross-screen, clipboard and file-transfer applications are **not built yet** (they sit on the link). Interoperability with the vendor's
