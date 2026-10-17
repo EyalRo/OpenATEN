@@ -49,7 +49,10 @@ openaten forward --max-active 600                  # real run; ctrl+alt+scrolllo
 
 Reading and grabbing keyboards and mice needs access to `/dev/input/event*`: add your user to the `input` group
 (NixOS: `users.users.<name>.extraGroups = [ "input" ];`). While forwarding is on the local devices are grabbed, so nothing reaches
-this desktop; toggling off (or any exit) releases the grab and releases every key/button on the other computer. The other
+this desktop. The grab only starts after every key and button is physically released (press the hotkey, then let go of all keys), and
+it ends only once everything is released again; otherwise the desktop would miss a key release and show stuck modifiers. Turning forwarding
+off (or any exit) releases every key and button on the other computer at once. If a modifier ever does look stuck, tap Ctrl, Shift, Alt and Super once.
+Avoid hotkeys that other programs use (for example `ctrl+g`); the default is `ctrl+alt+scrolllock`. The other
 computer needs no OpenATEN software for this: it sees an ordinary USB keyboard and mouse.
 
 Also recommended: stop the kernel from probing the bridge's storage function (see [hardware.md](hardware.md)):

@@ -42,7 +42,10 @@ def parse_hotkey(spec: str) -> tuple[frozenset[int], int]:
 class Forwarder:
     """Feed it events with :meth:`handle`; HID reports go to ``send_report`` while forwarding is on.
 
-    ``on_state(active)`` is called when forwarding turns on or off (the caller grabs/ungrabs the devices there).
+    Turning forwarding on or off is *deferred until every key and button is physically up*. Grabbing a device while a key is down
+    would leave the local desktop believing that key is still held (it never sees the release): sticky modifiers. ``on_state(grabbed)``
+    is called when the devices should actually be grabbed or released. ``keys_down()`` may report extra physical state (for example
+    keys that were already down before we started watching); call :meth:`tick` periodically so a pending change applies once they are up.
     """
 
     def __init__(
@@ -50,26 +53,38 @@ class Forwarder:
         send_report: Callable[[bytes], None],
         hotkey: str = DEFAULT_HOTKEY,
         on_state: Optional[Callable[[bool], None]] = None,
+        keys_down: Optional[Callable[[], bool]] = None,
     ):
         self.send_report = send_report
-        self.on_state = on_state or (lambda active: None)
+        self.on_state = on_state or (lambda grabbed: None)
+        self.keys_down = keys_down or (lambda: False)
         self.chord, self.trigger = parse_hotkey(hotkey)
-        self.active = False
-        self._held: set[int] = set()  # physical keys currently down (for chord detection)
+        self.desired = False  # what the user asked for
+        self.active = False  # devices are grabbed (the request has been applied)
+        self._held: set[int] = set()  # physical keys currently down (tracked from events)
         self._translator = H.Translator()
 
-    def set_active(self, active: bool) -> None:
-        if active == self.active:
+    @property
+    def forwarding(self) -> bool:
+        return self.desired and self.active
+
+    def request(self, on: bool) -> None:
+        if on == self.desired:
             return
-        if active:
-            self._translator = H.Translator()
-            self.active = True
-            self.on_state(True)
-        else:
-            for report in self._translator.release_all():  # never leave keys stuck on the other computer
+        self.desired = on
+        if not on and self.active:
+            for report in self._translator.release_all():  # the other computer must never be left with keys held
                 self.send_report(report)
-            self.active = False
-            self.on_state(False)
+        self.tick()
+
+    def tick(self) -> None:
+        """Apply a pending on/off request once nothing is physically held."""
+        if self.desired == self.active or self._held or self.keys_down():
+            return
+        if self.desired:
+            self._translator = H.Translator()
+        self.active = self.desired
+        self.on_state(self.active)
 
     def handle(self, events: Iterable[tuple[int, int, int]]) -> None:
         forward: list[tuple[int, int, int]] = []
@@ -77,19 +92,26 @@ class Forwarder:
             if etype == H.EV_KEY and value in (0, 1):
                 (self._held.add if value else self._held.discard)(code)
                 if value == 1 and code == self.trigger and self.chord <= self._held:
-                    self.set_active(not self.active)
-                    forward = []  # the toggle press itself is never forwarded
-                    continue
+                    self.request(not self.desired)
+                    continue  # the toggle press itself is never forwarded
                 if code == self.trigger:  # also swallow the trigger's release
                     continue
-            if self.active:
+            if self.forwarding:
                 forward.append((etype, code, value))
-        if self.active and forward:
+        if forward:
             for report in self._translator.feed(forward):
                 self.send_report(report)
+        self.tick()
 
     def stop(self) -> None:
-        self.set_active(False)
+        """Turn everything off immediately (shutdown path): release the other computer's keys and the grab."""
+        if self.active:
+            for report in self._translator.release_all():
+                self.send_report(report)
+        self.desired = False
+        if self.active:
+            self.active = False
+            self.on_state(False)
 
 
 def _is_input_device(dev, exclude_vendors: set[int]) -> bool:
@@ -103,6 +125,14 @@ def _is_input_device(dev, exclude_vendors: set[int]) -> bool:
     is_keyboard = evdev.ecodes.KEY_A in keys and evdev.ecodes.KEY_SPACE in keys
     is_mouse = evdev.ecodes.REL_X in rels and evdev.ecodes.BTN_LEFT in keys
     return is_keyboard or is_mouse
+
+
+def _held_now(dev) -> bool:
+    """True if the kernel says any key or button on this device is currently down."""
+    try:
+        return bool(dev.active_keys())
+    except OSError:
+        return False
 
 
 def run_evdev(
@@ -142,17 +172,17 @@ def run_evdev(
                         grabbed.append(d)
                     except OSError as e:
                         log(f"could not grab {d.name}: {e}")
-            log("forwarding ON  (press the hotkey again to return control)")
+            log("devices grabbed: forwarding ON  (press the hotkey again to return control)")
         else:
             while grabbed:
                 try:
                     grabbed.pop().ungrab()
                 except OSError:
                     pass
-            log("forwarding OFF")
+            log("devices released: forwarding OFF")
 
     send = (lambda r: log(f"report {r.hex(' ')}")) if dry_run else send_report
-    fwd = Forwarder(send, hotkey, on_state)
+    fwd = Forwarder(send, hotkey, on_state, keys_down=lambda: any(_held_now(d) for d in devices))
     stop = {"flag": False}
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.__setitem__("flag", True))
@@ -168,16 +198,29 @@ def run_evdev(
                 except OSError:
                     by_fd.pop(fd, None)  # device unplugged
                     continue
-                was = fwd.active
+                was = fwd.forwarding
                 fwd.handle(events)
-                if fwd.active and not was:
+                if fwd.forwarding and not was:
                     active_since = time.monotonic()
-            if fwd.active and max_active and time.monotonic() - active_since > max_active:
+            fwd.tick()  # applies a pending on/off once the physical keys are up
+            if fwd.forwarding and max_active and time.monotonic() - active_since > max_active:
                 log(f"safety timeout ({max_active:.0f}s): returning control")
-                fwd.set_active(False)
+                fwd.request(False)
             if not by_fd:
                 log("all input devices disappeared")
                 return 1
     finally:
-        fwd.stop()  # ungrab and release everything, whatever happened
+        # Hand the devices back cleanly: stop forwarding, then keep the grab until every key is physically up so the desktop
+        # never misses a release; give up after 3 s rather than hang.
+        fwd.request(False)
+        deadline = time.monotonic() + 3.0
+        while fwd.active and time.monotonic() < deadline:
+            for fd in list(by_fd):
+                try:
+                    list(by_fd[fd].read())
+                except (OSError, BlockingIOError):
+                    pass
+            fwd.handle([])
+            time.sleep(0.02)
+        fwd.stop()
     return 0

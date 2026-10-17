@@ -155,6 +155,8 @@ def test_slave_input_stream_is_polled_quickly_while_active():
         while len(p.bridge.a.hid_in) < 60 and time.time() - t0 < 5:
             time.sleep(0.01)
     assert len(p.bridge.a.hid_in) == 60
-    delays = [arr - snt for arr, snt in zip(p.bridge.a.hid_times, sent)]
-    # the first report may wait for one idle poll; everything after the burst is flowing must be well under the idle period
-    assert max(delays[10:]) < 0.15, max(delays[10:])
+    # Reports injected before the master's first poll legitimately wait for it (up to the idle period). Once the first report has
+    # arrived the want-poll flag is raised, so everything injected after that must flow without waiting for the idle poll.
+    first_arrival = p.bridge.a.hid_times[0]
+    later = [(arr - snt) for arr, snt in zip(p.bridge.a.hid_times, sent) if snt > first_arrival]
+    assert len(later) >= 10 and max(later) < 0.15, max(later, default=None)
