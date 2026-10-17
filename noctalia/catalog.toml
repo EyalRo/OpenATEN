@@ -1,0 +1,10 @@
+[[plugin]]
+id = "stags/openaten"
+name = "OpenATEN"
+version = "0.1.0"
+author = "stags"
+license = "MIT"
+icon = "keyboard"
+description = "Status and toggle for OpenATEN input forwarding over an ATEN USB switch"
+plugin_api = 9
+tags = ["usb", "input"]

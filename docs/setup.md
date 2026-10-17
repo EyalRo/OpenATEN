@@ -63,5 +63,5 @@ Also recommended: stop the kernel from probing the bridge's storage function (se
 `openaten daemon` owns the input forwarder and publishes `$XDG_RUNTIME_DIR/openaten/status.json`; `openaten ctl {status,on,off,toggle,quit}`
 controls it over `ctl.sock`. The bridge end is only claimed while forwarding is on. Build with `nix build .#default` (or `nix run . -- daemon`).
 
-A Noctalia v5 bar widget lives in the `stags/openaten` plugin of the personal plugin repo: it shows bridge/forwarding state and toggles on click
+A Noctalia v5 bar widget lives in [`noctalia/`](../noctalia/README.md): it shows bridge/forwarding state and toggles on click
 (add `stags/openaten:widget` to a bar). The widget runs `openaten ctl toggle`, so `openaten` must be on the shell's PATH.

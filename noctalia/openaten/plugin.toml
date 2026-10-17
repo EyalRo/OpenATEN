@@ -1,0 +1,12 @@
+id = "stags/openaten"
+name = "OpenATEN"
+version = "0.1.0"
+plugin_api = 9
+author = "stags"
+description = "Status and on/off toggle for OpenATEN keyboard/mouse forwarding over an ATEN USB switch"
+tags = ["Bar"]
+icon = "keyboard"
+
+[[widget]]
+id = "widget"
+entry = "openaten.luau"
