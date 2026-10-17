@@ -237,6 +237,9 @@ class EvdevRunner:
                         self._grabbed.append(d)
                     except OSError as e:
                         self.log(f"could not grab {d.name}: {e}")
+                        self.error = f"could not grab {d.name}: {e} (is another openaten instance running?)"
+                        self._abort = True  # step() returns control: never forward while the desktop still sees the input
+                        return
             self._active_since = time.monotonic()
             self.log("devices grabbed: forwarding ON  (press the hotkey again to return control)")
         else:
