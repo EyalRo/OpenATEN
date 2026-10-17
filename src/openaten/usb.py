@@ -114,9 +114,10 @@ class BridgeEnd:
                 self.reset()
                 time.sleep(0.05)
                 if attempt == 1 and data_in:
-                    # An end that last received refuses another data-in command until it has issued a non-data one.
+                    # Observed: an end whose last command was a receive can refuse the next data-in command until it has
+                    # run a data-out one. A zero mouse report is the harmless data-out command (no movement, no buttons).
                     try:
-                        self.cmd(pr.cdb(pr.CMD_INIT), timeout=timeout, cbw_timeout=timeout)
+                        self.cmd(pr.cdb_hid(5), data_out=bytes(5), timeout=timeout, cbw_timeout=timeout)
                     except usb.core.USBError:
                         self.reset()
 

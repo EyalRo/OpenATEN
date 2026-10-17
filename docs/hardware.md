@@ -22,16 +22,18 @@ running NixOS, with both upstream cables connected to the same computer.
 3. **Issue a bulk-only reset (class request 0xFF) and clear both halts after any failed or timed-out transfer.**
 4. **`SWITCH` (0x07) re-enumerates both ends at once** and flips the LUN between CD-ROM and disk mode. Ports keep their
    path (e.g. `1.2`, `2`) but get new device addresses; find ends by port path, not address.
-5. **Tell the kernel to ignore the bridge's mass-storage function** with `usb-storage.quirks=05e3:0627:i` (kernel parameter, or at
-   runtime via `/sys/module/usb_storage/parameters/quirks`). Otherwise every time a process releases an end, the kernel rebinds
-   `usb-storage` and scans the firmware with its own commands; symptoms are a first stand-alone command that is refused after a
-   session, and (worse) wedged firmware.
+5. **Keep the kernel's `usb-storage` driver away from the bridge's mass-storage function** (kernel parameter
+   `usb-storage.quirks=05e3:0627:i`). When the kernel binds at plug-in or boot it scans the firmware with its own commands; repeated
+   re-binds wedged the firmware in our early tests. (We could not show that it is the cause of the refusal described in 9.)
 6. **The peer's HID interface must be polled.** HID injection only works while something polls the receiving end's interrupt
    endpoint (an OS driver with an input device open). If a test tool detaches `usbhid` and exits without re-attaching it, further
    injections are refused. `openaten hid` restores the driver when it finishes.
 7. A udev rule numbered below 73 (see `udev/70-openaten.rules`) is needed for the `uaccess` tag to give your user
    access to the USB node without root.
 8. If anything misbehaves, power-cycle the switch (power and both USB-C cables).
+9. **Open question:** after a link session, the first stand-alone data-in command (state, INQUIRY) from a *new process* on one end is
+   sometimes refused (twice in a row), while a data-out command (HID) is accepted and afterwards the data-in command works. `BridgeEnd.simple()`
+   works around it (retry after reset, then a zero mouse report). HID injection itself has been reliable.
 
 ## Flow control: strict turn-taking (verified)
 
