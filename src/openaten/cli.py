@@ -86,8 +86,58 @@ def cmd_loopback(args) -> int:
     return 0 if ok == args.count else 2
 
 
+def _pattern(tag: bytes, n: int) -> bytes:
+    """Deterministic bulk payload so two computers can verify each other's data without sharing a file."""
+    import hashlib
+
+    out, block = bytearray(), tag
+    while len(out) < n:
+        block = hashlib.sha256(block).digest()
+        out += block
+    return bytes(out[:n])
+
+
+def cmd_link_peer(args) -> int:
+    """One side of the two-computer link test: run `link --role master` on one computer and `--role slave` on the other."""
+    import hashlib
+
+    ends = _open_all()
+    if not ends:
+        print("no bridge end found (see `openaten list`)")
+        return 1
+    master = args.role == "master"
+    peer = "slave" if master else "master"
+    got: list = []
+    done = threading.Event()
+
+    def on_message(channel, msg_id, data):
+        got.append((channel, hashlib.sha256(data).hexdigest(), len(data)))
+        if len(got) >= 2:
+            done.set()
+
+    errors: list = []
+    link = LinkSession(UsbTransport(ends[0]), master, on_message, poll_idle=0.02, on_error=errors.append)
+    small, big = f"hello from {args.role}".encode(), _pattern(args.role.encode(), args.mib << 20)
+    link.start()
+    t0 = time.time()
+    link.send_message(1, small)
+    link.send_message(2, big)
+    ok = done.wait(args.timeout)
+    dt = time.time() - t0
+    if not link.stop():
+        _STUCK_THREADS.append(True)
+    want_small, want_big = f"hello from {peer}".encode(), _pattern(peer.encode(), args.mib << 20)
+    expect = {(1, hashlib.sha256(want_small).hexdigest(), len(want_small)), (2, hashlib.sha256(want_big).hexdigest(), len(want_big))}
+    intact = set(got) == expect
+    print(f"{args.role}: delivered={ok} intact={intact} errors={errors} in {dt:.2f}s")
+    print(link.stats)
+    return 0 if ok and intact and not errors else 2
+
+
 def cmd_link(args) -> int:
     """Run both link roles over the two ends on this host: messages both ways plus a large transfer."""
+    if args.role:
+        return cmd_link_peer(args)
     import hashlib
     import os
 
@@ -242,7 +292,9 @@ def main(argv: list[str] | None = None) -> int:
     lb = sub.add_parser("loopback", help="packet round-trip test between two ends on this host")
     lb.add_argument("-n", "--count", type=int, default=5)
     lb.set_defaults(fn=cmd_loopback)
-    lk = sub.add_parser("link", help="link-layer self-test (messages both ways + bulk) between two ends on this host")
+    lk = sub.add_parser("link", help="link-layer self-test (messages both ways + bulk); with --role, one side of a two-computer test")
+    lk.add_argument("--role", choices=["master", "slave"], help="run only this side (start it on both computers, within a few seconds)")
+    lk.add_argument("--timeout", type=float, default=60, help="seconds to wait for the peer (with --role)")
     lk.add_argument("--mib", type=int, default=8, help="size of the bulk message in MiB (each direction)")
     lk.set_defaults(fn=cmd_link)
     fw = sub.add_parser("forward", help="forward this computer's keyboard/mouse to the other computer (hotkey toggles)")
