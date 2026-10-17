@@ -136,13 +136,14 @@ def cmd_forward(args) -> int:
     """Forward this computer's keyboard and mouse to the other computer (needs read access to /dev/input)."""
     from .forward import run_evdev
 
-    ends = _open_all()
+    candidates = sorted(find_ends(), key=lambda d: (d.bus, port_path(d)))
     if args.port:
-        ends = [e for e in ends if port_path(e.dev) == args.port]
-    if not ends:
+        candidates = [d for d in candidates if port_path(d) == args.port]
+    if not candidates:
         print("no bridge end found (see `openaten list`)")
         return 1
-    end = ends[0]
+    end = BridgeEnd(candidates[0])  # claim only the end we inject through; the other one stays free for other tools
+    _OPENED.append(end)
     print(f"injecting through the end on port {port_path(end.dev)}")
     try:
         return run_evdev(end.hid, args.hotkey, dry_run=args.dry_run, max_active=args.max_active or None)

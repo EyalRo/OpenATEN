@@ -65,3 +65,57 @@ def test_release_all_clears_held_state():
     rel = t.release_all()
     assert bytes(8) in rel and bytes(5) in rel
     assert t.release_all() == []
+
+
+# --- touchpad -----------------------------------------------------------------------------------------------------------------------
+from openaten.hid import ABS_X, ABS_Y, BTN_TOOL_DOUBLETAP, BTN_TOUCH, EV_ABS, Touchpad  # noqa: E402
+
+
+def pad_events(*points, touch=True):
+    out = [(EV_KEY, BTN_TOUCH, 1)] if touch else []
+    for x, y in points:
+        out += [(EV_ABS, ABS_X, x), (EV_ABS, ABS_Y, y), (EV_SYN, 0, 0)]
+    return out
+
+
+def test_touchpad_motion_becomes_relative_mouse_motion():
+    clock = {"t": 0.0}
+    pad = Touchpad(speed=1.0, now=lambda: clock["t"])
+    reports = list(pad.feed(pad_events((100, 100), (110, 95), (130, 95))))
+    # first sample anchors; then dx=10,dy=-5 and dx=20,dy=0
+    assert reports == [bytes([0, 10, 0xFB, 0, 0]), bytes([0, 20, 0, 0, 0])]
+
+
+def test_touchpad_speed_scales_and_keeps_fractions():
+    pad = Touchpad(speed=0.5, now=lambda: 0.0)
+    out = list(pad.feed(pad_events((0, 0), (1, 0), (2, 0), (3, 0), (4, 0))))
+    assert sum(r[1] for r in out) == 2  # 4 units * 0.5, no drift from rounding
+
+
+def test_touchpad_tap_is_a_click_but_a_drag_is_not():
+    t = {"v": 0.0}
+    pad = Touchpad(speed=1.0, now=lambda: t["v"])
+    list(pad.feed(pad_events((50, 50))))
+    t["v"] = 0.1
+    out = list(pad.feed([(EV_KEY, BTN_TOUCH, 0), (EV_SYN, 0, 0)]))
+    assert out == [bytes([1, 0, 0, 0, 0]), bytes(5)]
+    list(pad.feed(pad_events((50, 50), (200, 200))))
+    t["v"] = 0.2
+    assert list(pad.feed([(EV_KEY, BTN_TOUCH, 0), (EV_SYN, 0, 0)])) == []  # moved too far: not a tap
+
+
+def test_touchpad_two_finger_scroll():
+    pad = Touchpad(now=lambda: 0.0)
+    list(pad.feed([(EV_KEY, BTN_TOOL_DOUBLETAP, 1)] + pad_events((100, 100), (100, 100 + 2 * Touchpad.SCROLL_UNITS_PER_STEP))))
+    out = list(pad.feed([(EV_ABS, ABS_Y, 100 + 2 * Touchpad.SCROLL_UNITS_PER_STEP), (EV_SYN, 0, 0)]))
+    assert out == []  # no further movement
+    pad2 = Touchpad(now=lambda: 0.0)
+    out = list(pad2.feed([(EV_KEY, BTN_TOOL_DOUBLETAP, 1)] + pad_events((100, 100), (100, 100 + 2 * Touchpad.SCROLL_UNITS_PER_STEP))))
+    assert out and out[0][3] == (-2) & 0xFF  # wheel moved by two steps
+
+
+def test_touchpad_button_is_left_click_and_release_all_clears_it():
+    pad = Touchpad(now=lambda: 0.0)
+    out = list(pad.feed([(EV_KEY, hid.BTN_LEFT, 1), (EV_SYN, 0, 0)]))
+    assert out == [bytes([1, 0, 0, 0, 0])]
+    assert pad.release_all() == [bytes(5)]

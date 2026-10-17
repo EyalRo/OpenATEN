@@ -149,3 +149,109 @@ class Translator:
         """Reports that release every held key and button (call when forwarding stops)."""
         out = [r for r in (self.keyboard.release_all(), self.mouse.release_all()) if r is not None]
         return out
+
+
+# --- touchpads (absolute devices) -------------------------------------------------------------------------------------------------
+EV_ABS = 3
+ABS_X, ABS_Y = 0, 1
+BTN_TOUCH, BTN_TOOL_FINGER, BTN_TOOL_DOUBLETAP = 0x14A, 0x145, 0x14D
+
+
+class Touchpad:
+    """Turn a touchpad's absolute finger positions into relative mouse motion, clicks and scrolling.
+
+    One finger moves the pointer; a short touch without movement is a left click (tap-to-click); two fingers scroll (vertical -> wheel,
+    horizontal -> pan); the pad's own button maps to the left button. ``speed`` scales pad units to mouse counts.
+    """
+
+    TAP_MAX_SECONDS = 0.25
+    TAP_MAX_TRAVEL = 40  # pad units
+    SCROLL_UNITS_PER_STEP = 70
+
+    def __init__(self, speed: float = 0.6, now=None) -> None:
+        import time
+
+        self.speed = speed
+        self._now = now or time.monotonic
+        self.x = self.y = 0
+        self._last: tuple[int, int] | None = None
+        self._touching = False
+        self._fingers = 1
+        self._down_at = 0.0
+        self._travel = 0
+        self._frac_x = self._frac_y = 0.0
+        self._scroll_x = self._scroll_y = 0
+        self.mouse = Mouse()  # shared report builder (buttons + deltas)
+        self._tap_pending = False
+
+    def feed(self, events: Iterable[tuple[int, int, int]]) -> Iterator[bytes]:
+        for etype, code, value in events:
+            if etype == EV_ABS:
+                if code == ABS_X:
+                    self.x = value
+                elif code == ABS_Y:
+                    self.y = value
+            elif etype == EV_KEY:
+                if code == BTN_TOUCH:
+                    self._touch(bool(value))
+                elif code == BTN_TOOL_DOUBLETAP:
+                    self._fingers = 2 if value else 1
+                    self._last = None  # re-anchor so switching finger count does not jump
+                elif code == BTN_LEFT:
+                    self.mouse.key_event(BTN_LEFT, value)
+            elif etype == EV_SYN and code == SYN_REPORT:
+                self._motion()
+                yield from self.mouse.flush()
+                if self._tap_pending:
+                    self._tap_pending = False
+                    yield bytes([1, 0, 0, 0, 0])  # tap: left down...
+                    yield bytes(5)  # ...and up
+
+    def _touch(self, down: bool) -> None:
+        if down:
+            self._touching = True
+            self._down_at = self._now()
+            self._travel = 0
+            self._last = None
+            self._frac_x = self._frac_y = 0.0
+        else:
+            if self._touching and self._fingers == 1 and self._travel < self.TAP_MAX_TRAVEL and self._now() - self._down_at < self.TAP_MAX_SECONDS:
+                self._tap_pending = True
+            self._touching = False
+            self._last = None
+            self._scroll_x = self._scroll_y = 0
+
+    def _motion(self) -> None:
+        if not self._touching:
+            return
+        if self._last is None:
+            self._last = (self.x, self.y)
+            return
+        dx, dy = self.x - self._last[0], self.y - self._last[1]
+        self._last = (self.x, self.y)
+        self._travel += abs(dx) + abs(dy)
+        if self._fingers >= 2:
+            self._scroll_x += dx
+            self._scroll_y += dy
+            steps_y = int(self._scroll_y / self.SCROLL_UNITS_PER_STEP)  # truncates toward zero
+            steps_x = int(self._scroll_x / self.SCROLL_UNITS_PER_STEP)
+            self._scroll_y -= steps_y * self.SCROLL_UNITS_PER_STEP
+            self._scroll_x -= steps_x * self.SCROLL_UNITS_PER_STEP
+            if steps_y:
+                self.mouse.rel_event(REL_WHEEL, -steps_y)  # fingers down -> content up (natural scrolling off)
+            if steps_x:
+                self.mouse.rel_event(REL_HWHEEL, steps_x)
+            return
+        self._frac_x += dx * self.speed
+        self._frac_y += dy * self.speed
+        ix, iy = int(self._frac_x), int(self._frac_y)
+        self._frac_x -= ix
+        self._frac_y -= iy
+        if ix:
+            self.mouse.rel_event(REL_X, ix)
+        if iy:
+            self.mouse.rel_event(REL_Y, iy)
+
+    def release_all(self) -> list[bytes]:
+        r = self.mouse.release_all()
+        return [r] if r is not None else []

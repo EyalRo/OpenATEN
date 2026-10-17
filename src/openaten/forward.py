@@ -63,6 +63,7 @@ class Forwarder:
         self.active = False  # devices are grabbed (the request has been applied)
         self._held: set[int] = set()  # physical keys currently down (tracked from events)
         self._translator = H.Translator()
+        self._pads: dict[object, H.Touchpad] = {}
 
     @property
     def forwarding(self) -> bool:
@@ -73,9 +74,16 @@ class Forwarder:
             return
         self.desired = on
         if not on and self.active:
-            for report in self._translator.release_all():  # the other computer must never be left with keys held
-                self.send_report(report)
+            self._release_peer()
         self.tick()
+
+    def _release_peer(self) -> None:
+        """The other computer must never be left with keys or buttons held."""
+        for report in self._translator.release_all():
+            self.send_report(report)
+        for pad in self._pads.values():
+            for report in pad.release_all():
+                self.send_report(report)
 
     def tick(self) -> None:
         """Apply a pending on/off request once nothing is physically held."""
@@ -83,10 +91,12 @@ class Forwarder:
             return
         if self.desired:
             self._translator = H.Translator()
+            self._pads = {}
         self.active = self.desired
         self.on_state(self.active)
 
-    def handle(self, events: Iterable[tuple[int, int, int]]) -> None:
+    def handle(self, events: Iterable[tuple[int, int, int]], source: object = None, touchpad: bool = False) -> None:
+        """Process one batch from one device. ``touchpad`` marks absolute pointing devices, which keep per-device state."""
         forward: list[tuple[int, int, int]] = []
         for etype, code, value in events:
             if etype == H.EV_KEY and value in (0, 1):
@@ -99,32 +109,38 @@ class Forwarder:
             if self.forwarding:
                 forward.append((etype, code, value))
         if forward:
-            for report in self._translator.feed(forward):
+            translator = self._pads.setdefault(source, H.Touchpad()) if touchpad else self._translator
+            for report in translator.feed(forward):
                 self.send_report(report)
         self.tick()
 
     def stop(self) -> None:
         """Turn everything off immediately (shutdown path): release the other computer's keys and the grab."""
         if self.active:
-            for report in self._translator.release_all():
-                self.send_report(report)
+            self._release_peer()
         self.desired = False
         if self.active:
             self.active = False
             self.on_state(False)
 
 
-def _is_input_device(dev, exclude_vendors: set[int]) -> bool:
+def _device_kind(dev, exclude_vendors: set[int]) -> str | None:
+    """'keyboard', 'mouse', 'touchpad' or None (ignore). The bridge's own HID devices are always ignored."""
     import evdev
 
     if dev.info.vendor in exclude_vendors:  # never read the bridge's own HID devices (would loop in loopback setups)
-        return False
+        return None
     caps = dev.capabilities()
     keys = caps.get(evdev.ecodes.EV_KEY, [])
     rels = caps.get(evdev.ecodes.EV_REL, [])
-    is_keyboard = evdev.ecodes.KEY_A in keys and evdev.ecodes.KEY_SPACE in keys
-    is_mouse = evdev.ecodes.REL_X in rels and evdev.ecodes.BTN_LEFT in keys
-    return is_keyboard or is_mouse
+    abss = [a[0] if isinstance(a, tuple) else a for a in caps.get(evdev.ecodes.EV_ABS, [])]
+    if evdev.ecodes.KEY_A in keys and evdev.ecodes.KEY_SPACE in keys:
+        return "keyboard"
+    if evdev.ecodes.REL_X in rels and evdev.ecodes.BTN_LEFT in keys:
+        return "mouse"
+    if evdev.ecodes.ABS_X in abss and evdev.ecodes.ABS_Y in abss and evdev.ecodes.BTN_TOUCH in keys:
+        return "touchpad"
+    return None
 
 
 def _held_now(dev) -> bool:
@@ -148,18 +164,21 @@ def run_evdev(
 
     exclude = {0x05E3, 0x0557} | (exclude_vendors or set())
     devices = []
+    kinds: dict[int, str] = {}
     for path in evdev.list_devices():
         try:
             dev = evdev.InputDevice(path)
         except OSError:
             continue
-        if _is_input_device(dev, exclude):
+        kind = _device_kind(dev, exclude)
+        if kind:
             devices.append(dev)
+            kinds[dev.fd] = kind
     if not devices:
         log("no readable keyboard/mouse devices found (are you in the 'input' group?)")
         return 1
     for d in devices:
-        log(f"watching {d.name} ({d.path})")
+        log(f"watching {d.name} ({d.path}) as {kinds[d.fd]}")
 
     grabbed: list = []
 
@@ -199,7 +218,7 @@ def run_evdev(
                     by_fd.pop(fd, None)  # device unplugged
                     continue
                 was = fwd.forwarding
-                fwd.handle(events)
+                fwd.handle(events, source=fd, touchpad=kinds[fd] == "touchpad")
                 if fwd.forwarding and not was:
                     active_since = time.monotonic()
             fwd.tick()  # applies a pending on/off once the physical keys are up

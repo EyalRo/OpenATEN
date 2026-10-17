@@ -117,3 +117,20 @@ def test_stop_always_releases_even_with_keys_down():
     assert not f.active and states == [True, False] and bytes(8) in sent
     f.stop()
     assert states == [True, False]
+
+
+def test_touchpad_events_are_forwarded_as_mouse_motion_and_block_the_grab_while_touching():
+    from openaten.hid import ABS_X, ABS_Y, BTN_TOUCH, EV_ABS
+
+    f, sent, states = make()
+    chord(f)
+    assert f.forwarding
+    f.handle([(hid.EV_KEY, BTN_TOUCH, 1), (EV_ABS, ABS_X, 10), (EV_ABS, ABS_Y, 10), (hid.EV_SYN, 0, 0),
+              (EV_ABS, ABS_X, 30), (EV_ABS, ABS_Y, 10), (hid.EV_SYN, 0, 0)], source="pad", touchpad=True)
+    assert sent and sent[-1][1] > 0  # moved right
+    sent.clear()
+    f.handle(CHORD_DOWN)  # toggle off while the finger is still on the pad
+    f.handle(CHORD_UP)
+    assert f.active  # grab stays until the finger lifts
+    f.handle([(hid.EV_KEY, BTN_TOUCH, 0), (hid.EV_SYN, 0, 0)], source="pad", touchpad=True)
+    assert not f.active and states == [True, False]
