@@ -152,6 +152,42 @@ def cmd_forward(args) -> int:
         return 1
 
 
+def cmd_daemon(args) -> int:
+    """Run the background service: input forwarder + status file + control socket (see openaten.daemon)."""
+    from . import daemon as dm
+    from .forward import EvdevRunner
+
+    d = dm.Daemon(
+        lambda send: EvdevRunner(send, args.hotkey, max_active=args.max_active or None, log=lambda m: print(m, flush=True)),
+        find_ends,
+        BridgeEnd,
+        port=args.port,
+        port_of=port_path,
+        hotkey=args.hotkey,
+        log=lambda m: print(m, flush=True),
+    )
+    import signal
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda *_: d.stop_flag.set())
+    return d.run()
+
+
+def cmd_ctl(args) -> int:
+    """Send a command to the running daemon and print its status as JSON."""
+    import json
+
+    from . import daemon as dm
+
+    try:
+        reply = dm.request(args.command)
+    except (FileNotFoundError, ConnectionRefusedError, OSError):
+        print(json.dumps({"ok": False, "error": "daemon not running"}))
+        return 1
+    print(json.dumps(reply))
+    return 0 if reply.get("ok") else 1
+
+
 def cmd_hid(_args) -> int:
     """Inject mouse/keyboard reports on one end and read them back from the other end's HID interface."""
     ends = _open_all()
@@ -214,6 +250,14 @@ def main(argv: list[str] | None = None) -> int:
     fw.add_argument("--dry-run", action="store_true", help="print the reports instead of grabbing devices and injecting")
     fw.add_argument("--max-active", type=float, default=0, help="safety: return control after this many seconds (0 = never)")
     fw.set_defaults(fn=cmd_forward)
+    dm_ = sub.add_parser("daemon", help="background service: forwarder + status file + control socket (for the Noctalia widget)")
+    dm_.add_argument("--port", help="USB port path of the end to inject through (default: first end)")
+    dm_.add_argument("--hotkey", default="ctrl+alt+scrolllock", help="chord that toggles forwarding")
+    dm_.add_argument("--max-active", type=float, default=0, help="safety: return control after this many seconds (0 = never)")
+    dm_.set_defaults(fn=cmd_daemon)
+    ct = sub.add_parser("ctl", help="control the running daemon")
+    ct.add_argument("command", choices=["status", "on", "off", "toggle", "quit"])
+    ct.set_defaults(fn=cmd_ctl)
     sub.add_parser("hid", help="HID injection round-trip test between two ends on this host").set_defaults(fn=cmd_hid)
     args = ap.parse_args(argv)
     try:

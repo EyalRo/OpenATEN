@@ -151,6 +151,141 @@ def _held_now(dev) -> bool:
         return False
 
 
+class EvdevRunner:
+    """Reads the local keyboards, mice and touchpads with evdev and drives a :class:`Forwarder`.
+
+    Step-based so a daemon can run it from its own loop: call :meth:`step` repeatedly, :meth:`request` to switch forwarding, :meth:`close` at the
+    end. A failing ``send_report`` (for example the bridge was unplugged) returns control immediately and is reported in :meth:`status`.
+    """
+
+    def __init__(
+        self,
+        send_report: Callable[[bytes], None],
+        hotkey: str = DEFAULT_HOTKEY,
+        dry_run: bool = False,
+        max_active: float | None = None,
+        exclude_vendors: set[int] | None = None,
+        log: Callable[[str], None] = print,
+    ):
+        self.log, self.dry_run, self.max_active, self.hotkey = log, dry_run, max_active, hotkey
+        self._exclude = {0x05E3, 0x0557} | (exclude_vendors or set())
+        self._send_report = send_report
+        self.devices: list = []
+        self.kinds: dict[int, str] = {}
+        self._by_fd: dict[int, object] = {}
+        self._grabbed: list = []
+        self._active_since = 0.0
+        self._abort = False
+        self.error: str | None = None
+        send = (lambda r: log(f"report {r.hex(' ')}")) if dry_run else self._send
+        self.fwd = Forwarder(send, hotkey, self._on_state, keys_down=lambda: any(_held_now(d) for d in self.devices))
+
+    # -- devices ----------------------------------------------------------------------
+    def open(self) -> bool:
+        """(Re)scan for local input devices. Returns False if none are readable."""
+        import evdev
+
+        self.devices, self.kinds, self._by_fd = [], {}, {}
+        for path in evdev.list_devices():
+            try:
+                dev = evdev.InputDevice(path)
+            except OSError:
+                continue
+            kind = _device_kind(dev, self._exclude)
+            if kind:
+                self.devices.append(dev)
+                self.kinds[dev.fd] = kind
+                self._by_fd[dev.fd] = dev
+                self.log(f"watching {dev.name} ({dev.path}) as {kind}")
+        if not self.devices:
+            self.log("no readable keyboard/mouse devices found (are you in the 'input' group?)")
+        return bool(self.devices)
+
+    # -- control ----------------------------------------------------------------------
+    def request(self, on: bool | None = None) -> None:
+        """Turn forwarding on or off; ``None`` toggles. The change applies once every key is physically up."""
+        on = (not self.fwd.desired) if on is None else on
+        if on:
+            self.error = None
+        self.fwd.request(on)
+
+    def status(self) -> dict:
+        return {
+            "forwarding": self.fwd.forwarding,
+            "pending": self.fwd.desired != self.fwd.active,
+            "devices": [d.name for d in self.devices],
+            "hotkey": self.hotkey,
+            "error": self.error,
+        }
+
+    def _send(self, report: bytes) -> None:
+        if self._abort:
+            return
+        try:
+            self._send_report(report)
+        except Exception as e:  # bridge unplugged, firmware refusing...: give control back instead of dying
+            self.error = f"injection failed: {e}"
+            self.log(self.error)
+            self._abort = True
+
+    def _on_state(self, grabbed: bool) -> None:
+        if grabbed:
+            if not self.dry_run:
+                for d in self.devices:
+                    try:
+                        d.grab()
+                        self._grabbed.append(d)
+                    except OSError as e:
+                        self.log(f"could not grab {d.name}: {e}")
+            self._active_since = time.monotonic()
+            self.log("devices grabbed: forwarding ON  (press the hotkey again to return control)")
+        else:
+            while self._grabbed:
+                try:
+                    self._grabbed.pop().ungrab()
+                except OSError:
+                    pass
+            self.log("devices released: forwarding OFF")
+
+    # -- loop -------------------------------------------------------------------------
+    def step(self, timeout: float = 0.25) -> None:
+        """Wait up to ``timeout`` for input events, process them, apply pending changes and safety rules."""
+        if self._by_fd:
+            ready, _, _ = select.select(list(self._by_fd), [], [], timeout)
+        else:
+            ready = []
+            time.sleep(timeout)
+        for fd in ready:
+            try:
+                events = [(e.type, e.code, e.value) for e in self._by_fd[fd].read()]
+            except OSError:
+                self._by_fd.pop(fd, None)  # device unplugged
+                continue
+            self.fwd.handle(events, source=fd, touchpad=self.kinds[fd] == "touchpad")
+        self.fwd.tick()
+        if self._abort:  # a report could not be delivered: return control
+            self._abort = False
+            self.fwd.request(False)
+            self._abort = False
+        if self.fwd.forwarding and self.max_active and time.monotonic() - self._active_since > self.max_active:
+            self.log(f"safety timeout ({self.max_active:.0f}s): returning control")
+            self.fwd.request(False)
+
+    def close(self) -> None:
+        """Hand the devices back cleanly: keep the grab until every key is physically up (max 3 s), then release everything."""
+        self.fwd.request(False)
+        deadline = time.monotonic() + 3.0
+        while self.fwd.active and time.monotonic() < deadline:
+            for fd in list(self._by_fd):
+                try:
+                    list(self._by_fd[fd].read())
+                except (OSError, BlockingIOError):
+                    pass
+            self.fwd.handle([])
+            time.sleep(0.02)
+        self.fwd.stop()
+
+
 def run_evdev(
     send_report: Callable[[bytes], None],
     hotkey: str = DEFAULT_HOTKEY,
@@ -159,87 +294,20 @@ def run_evdev(
     exclude_vendors: set[int] | None = None,
     log: Callable[[str], None] = print,
 ) -> int:
-    """Read all local keyboards/mice with evdev and forward while the hotkey toggle is on. Returns when interrupted."""
-    import evdev
-
-    exclude = {0x05E3, 0x0557} | (exclude_vendors or set())
-    devices = []
-    kinds: dict[int, str] = {}
-    for path in evdev.list_devices():
-        try:
-            dev = evdev.InputDevice(path)
-        except OSError:
-            continue
-        kind = _device_kind(dev, exclude)
-        if kind:
-            devices.append(dev)
-            kinds[dev.fd] = kind
-    if not devices:
-        log("no readable keyboard/mouse devices found (are you in the 'input' group?)")
+    """Interactive forwarding: runs until interrupted (SIGINT/SIGTERM)."""
+    runner = EvdevRunner(send_report, hotkey, dry_run, max_active, exclude_vendors, log)
+    if not runner.open():
         return 1
-    for d in devices:
-        log(f"watching {d.name} ({d.path}) as {kinds[d.fd]}")
-
-    grabbed: list = []
-
-    def on_state(active: bool) -> None:
-        if active:
-            if not dry_run:
-                for d in devices:
-                    try:
-                        d.grab()
-                        grabbed.append(d)
-                    except OSError as e:
-                        log(f"could not grab {d.name}: {e}")
-            log("devices grabbed: forwarding ON  (press the hotkey again to return control)")
-        else:
-            while grabbed:
-                try:
-                    grabbed.pop().ungrab()
-                except OSError:
-                    pass
-            log("devices released: forwarding OFF")
-
-    send = (lambda r: log(f"report {r.hex(' ')}")) if dry_run else send_report
-    fwd = Forwarder(send, hotkey, on_state, keys_down=lambda: any(_held_now(d) for d in devices))
     stop = {"flag": False}
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.__setitem__("flag", True))
-    by_fd = {d.fd: d for d in devices}
-    active_since = 0.0
     log(f"hotkey: {hotkey}" + ("  [dry run: devices are not grabbed, nothing is injected]" if dry_run else ""))
     try:
         while not stop["flag"]:
-            ready, _, _ = select.select(list(by_fd), [], [], 0.25)
-            for fd in ready:
-                try:
-                    events = [(e.type, e.code, e.value) for e in by_fd[fd].read()]
-                except OSError:
-                    by_fd.pop(fd, None)  # device unplugged
-                    continue
-                was = fwd.forwarding
-                fwd.handle(events, source=fd, touchpad=kinds[fd] == "touchpad")
-                if fwd.forwarding and not was:
-                    active_since = time.monotonic()
-            fwd.tick()  # applies a pending on/off once the physical keys are up
-            if fwd.forwarding and max_active and time.monotonic() - active_since > max_active:
-                log(f"safety timeout ({max_active:.0f}s): returning control")
-                fwd.request(False)
-            if not by_fd:
+            runner.step()
+            if not runner._by_fd:
                 log("all input devices disappeared")
                 return 1
     finally:
-        # Hand the devices back cleanly: stop forwarding, then keep the grab until every key is physically up so the desktop
-        # never misses a release; give up after 3 s rather than hang.
-        fwd.request(False)
-        deadline = time.monotonic() + 3.0
-        while fwd.active and time.monotonic() < deadline:
-            for fd in list(by_fd):
-                try:
-                    list(by_fd[fd].read())
-                except (OSError, BlockingIOError):
-                    pass
-            fwd.handle([])
-            time.sleep(0.02)
-        fwd.stop()
+        runner.close()
     return 0
