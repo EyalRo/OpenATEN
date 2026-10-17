@@ -9,7 +9,7 @@ description = "Open tooling for the host-to-host bridge in ATEN US3342-class USB
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-dependencies = ["pyusb>=1.2"]
+dependencies = ["pyusb>=1.2", "tomli>=2; python_version < \"3.11\""]
 
 [project.optional-dependencies]
 dev = ["pytest"]

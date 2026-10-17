@@ -128,6 +128,14 @@ class Mouse:
         return bytes([1, 0, 0, 0, 0])
 
 
+def move_reports(dx: int, dy: int) -> list[bytes]:
+    """Mouse reports for a pure relative move (no buttons), split into +-127 steps."""
+    mouse = Mouse()
+    mouse.rel_event(REL_X, dx)
+    mouse.rel_event(REL_Y, dy)
+    return mouse.flush()
+
+
 class Translator:
     """Combines a keyboard and a mouse; call :meth:`feed` with events, collect the returned HID reports."""
 

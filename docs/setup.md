@@ -55,6 +55,48 @@ off (or any exit) releases every key and button on the other computer at once. I
 Avoid hotkeys that other programs use (for example `ctrl+g`); the default is `ctrl+alt+shift+k`. The other
 computer needs no OpenATEN software for this: it sees an ordinary USB keyboard and mouse.
 
+### Edge hand-off (push the pointer through the screen border)
+
+Describe both computers' screens in `~/.config/openaten/screens.toml` (the same file works on both; only `local` differs, and defaults to the hostname).
+Coordinates are niri *logical* pixels in one shared space, y growing downwards. Screens that touch exactly form a border; only the overlapping part of
+the shared edge hands off. Example: the xps15 to the left of the 590i and a bit below it:
+
+```toml
+local = "590i"
+local_scale = 1.0     # logical pixels per mouse count here (1000/dpi with niri's flat profile)
+remote_scale = 1.0    # the same for the bridge's virtual mouse on the other computer
+push = 40             # pixels of pushing against the edge before control switches
+
+[[screen]]
+host = "590i"
+name = "DP-1"
+x = 0
+y = 0
+width = 2560
+height = 1440
+
+[[screen]]
+host = "xps15"
+name = "eDP-1"
+x = -1920
+y = 300
+width = 1920
+height = 1200
+```
+
+`openaten layout` prints the borders it derived. `openaten forward` and `openaten daemon` pick the file up automatically (or pass `--screens`).
+
+How it works and what to know:
+
+- niri cannot report the pointer position and the other computer runs no software, so each side's pointer is tracked from relative motion. Set
+  `accel-profile "flat"` for pointers in niri's `input` config **on both computers**, otherwise the tracking drifts.
+- After starting, push the pointer into a screen edge once (the status shows `edges: "calibrating"` until then); clamping at the edge gives the position.
+- When control switches, the other pointer is slammed into its top-left corner and moved to the matching row, so entry is only as accurate as the
+  other computer's flat-profile motion. Pushing back through the border returns control. The local pointer stays where it left, so it comes back at the row where
+  it went out, not at the row where the other pointer returned.
+- Only mice drive the edge detection. Touchpads still forward, but cannot trigger a switch (the hotkey and the Noctalia button always work).
+- Several local screens work as long as they are listed; the other computer's pointer position is exact only for the single-screen case.
+
 Also recommended: stop the kernel from probing the bridge's storage function (see [hardware.md](hardware.md)):
 `boot.kernelParams = [ "usb-storage.quirks=05e3:0627:i" ];` on NixOS.
 

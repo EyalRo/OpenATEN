@@ -13,6 +13,7 @@ import time
 from typing import Callable, Iterable, Optional
 
 from . import hid as H
+from .edges import EdgeSwitch
 
 KEY_NAMES = {
     "ctrl": 29, "leftctrl": 29, "rightctrl": 97, "shift": 42, "leftshift": 42, "rightshift": 54,
@@ -54,8 +55,10 @@ class Forwarder:
         hotkey: str = DEFAULT_HOTKEY,
         on_state: Optional[Callable[[bool], None]] = None,
         keys_down: Optional[Callable[[], bool]] = None,
+        edges: Optional[EdgeSwitch] = None,
     ):
         self.send_report = send_report
+        self.edges = edges
         self.on_state = on_state or (lambda grabbed: None)
         self.keys_down = keys_down or (lambda: False)
         self.chord, self.trigger = parse_hotkey(hotkey)
@@ -94,9 +97,18 @@ class Forwarder:
             self._pads = {}
         self.active = self.desired
         self.on_state(self.active)
+        if self.edges is not None:
+            if self.active:
+                for report in self.edges.entering():  # put the other pointer at the border we crossed
+                    self.send_report(report)
+            else:
+                self.edges.leaving()
 
     def handle(self, events: Iterable[tuple[int, int, int]], source: object = None, touchpad: bool = False) -> None:
         """Process one batch from one device. ``touchpad`` marks absolute pointing devices, which keep per-device state."""
+        if self.edges is not None and not self.desired and not self.active and not touchpad and self.edges.local_motion(events):
+            self.request(True)  # the pointer pushed through the border
+            events = [e for e in events if e[0] != H.EV_REL]  # the push itself must not move the other pointer
         forward: list[tuple[int, int, int]] = []
         for etype, code, value in events:
             if etype == H.EV_KEY and value in (0, 1):
@@ -111,7 +123,11 @@ class Forwarder:
         if forward:
             translator = self._pads.setdefault(source, H.Touchpad()) if touchpad else self._translator
             for report in translator.feed(forward):
+                if not self.forwarding:
+                    break
                 self.send_report(report)
+                if self.edges is not None and self.edges.remote_report(report):
+                    self.request(False)  # the other pointer pushed back through the border
         self.tick()
 
     def stop(self) -> None:
@@ -166,7 +182,9 @@ class EvdevRunner:
         max_active: float | None = None,
         exclude_vendors: set[int] | None = None,
         log: Callable[[str], None] = print,
+        edges: EdgeSwitch | None = None,
     ):
+        self.edges = edges
         self.log, self.dry_run, self.max_active, self.hotkey = log, dry_run, max_active, hotkey
         self._exclude = {0x05E3, 0x0557} | (exclude_vendors or set())
         self._send_report = send_report
@@ -178,7 +196,7 @@ class EvdevRunner:
         self._abort = False
         self.error: str | None = None
         send = (lambda r: log(f"report {r.hex(' ')}")) if dry_run else self._send
-        self.fwd = Forwarder(send, hotkey, self._on_state, keys_down=lambda: any(_held_now(d) for d in self.devices))
+        self.fwd = Forwarder(send, hotkey, self._on_state, keys_down=lambda: any(_held_now(d) for d in self.devices), edges=edges)
 
     # -- devices ----------------------------------------------------------------------
     def open(self) -> bool:
@@ -215,6 +233,7 @@ class EvdevRunner:
             "pending": self.fwd.desired != self.fwd.active,
             "devices": [d.name for d in self.devices],
             "hotkey": self.hotkey,
+            "edges": self.edges.state if self.edges is not None else "off",
             "error": self.error,
         }
 
@@ -296,9 +315,10 @@ def run_evdev(
     max_active: float | None = None,
     exclude_vendors: set[int] | None = None,
     log: Callable[[str], None] = print,
+    edges: EdgeSwitch | None = None,
 ) -> int:
     """Interactive forwarding: runs until interrupted (SIGINT/SIGTERM)."""
-    runner = EvdevRunner(send_report, hotkey, dry_run, max_active, exclude_vendors, log)
+    runner = EvdevRunner(send_report, hotkey, dry_run, max_active, exclude_vendors, log, edges)
     if not runner.open():
         return 1
     stop = {"flag": False}

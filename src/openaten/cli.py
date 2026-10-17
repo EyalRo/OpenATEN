@@ -6,6 +6,7 @@ from .forward import DEFAULT_HOTKEY
 import os
 import sys
 import threading
+from pathlib import Path
 import time
 
 import usb.core
@@ -183,6 +184,39 @@ def cmd_link(args) -> int:
     return 0 if ok and intact and not errors else 2
 
 
+def _load_edges(args):
+    """The edge hand-off configured by --screens or the default screens.toml, or None when there is none."""
+    from . import edges
+
+    path = Path(args.screens) if args.screens else edges.default_path()
+    if not path.exists():
+        if args.screens:
+            raise SystemExit(f"screen layout not found: {path}")
+        return None
+    try:
+        sw = edges.load(path)
+    except (ValueError, OSError) as e:
+        raise SystemExit(f"{path}: {e}")
+    print(f"edge hand-off on ({len(sw.pairs)} border(s) from {path}); push the pointer into a screen edge once to calibrate")
+    return sw
+
+
+def cmd_layout(args) -> int:
+    """Print the borders derived from the screen layout."""
+    from . import edges
+
+    path = Path(args.screens) if args.screens else edges.default_path()
+    try:
+        sw = edges.load(path)
+    except (ValueError, OSError) as e:
+        print(f"{path}: {e}")
+        return 1
+    for local, remote in sw.pairs:
+        axis = "xy"[local.axis]
+        print(f"leave via {axis}{'+' if local.sign > 0 else '-'} at {axis}={local.line:g}, {'xy'[1 - local.axis]} {local.lo:g}..{local.hi:g}: into {local.far}; back from {remote.far}")
+    return 0
+
+
 def cmd_forward(args) -> int:
     """Forward this computer's keyboard and mouse to the other computer (needs read access to /dev/input)."""
     from .forward import run_evdev
@@ -197,7 +231,7 @@ def cmd_forward(args) -> int:
     _OPENED.append(end)
     print(f"injecting through the end on port {port_path(end.dev)}")
     try:
-        return run_evdev(end.hid, args.hotkey, dry_run=args.dry_run, max_active=args.max_active or None)
+        return run_evdev(end.hid, args.hotkey, dry_run=args.dry_run, max_active=args.max_active or None, edges=_load_edges(args))
     except ImportError:
         print("python-evdev is required: pip install evdev")
         return 1
@@ -208,8 +242,9 @@ def cmd_daemon(args) -> int:
     from . import daemon as dm
     from .forward import EvdevRunner
 
+    sw = _load_edges(args)
     d = dm.Daemon(
-        lambda send: EvdevRunner(send, args.hotkey, max_active=args.max_active or None, log=lambda m: print(m, flush=True)),
+        lambda send: EvdevRunner(send, args.hotkey, max_active=args.max_active or None, log=lambda m: print(m, flush=True), edges=sw),
         find_ends,
         BridgeEnd,
         port=args.port,
@@ -302,12 +337,17 @@ def main(argv: list[str] | None = None) -> int:
     fw.add_argument("--hotkey", default=DEFAULT_HOTKEY, help="chord that toggles forwarding")
     fw.add_argument("--dry-run", action="store_true", help="print the reports instead of grabbing devices and injecting")
     fw.add_argument("--max-active", type=float, default=0, help="safety: return control after this many seconds (0 = never)")
+    fw.add_argument("--screens", help="screen layout TOML for edge hand-off (default: ~/.config/openaten/screens.toml if it exists)")
     fw.set_defaults(fn=cmd_forward)
     dm_ = sub.add_parser("daemon", help="background service: forwarder + status file + control socket (for the Noctalia widget)")
     dm_.add_argument("--port", help="USB port path of the end to inject through (default: first end)")
     dm_.add_argument("--hotkey", default=DEFAULT_HOTKEY, help="chord that toggles forwarding")
     dm_.add_argument("--max-active", type=float, default=0, help="safety: return control after this many seconds (0 = never)")
+    dm_.add_argument("--screens", help="screen layout TOML for edge hand-off (default: ~/.config/openaten/screens.toml if it exists)")
     dm_.set_defaults(fn=cmd_daemon)
+    ly = sub.add_parser("layout", help="show the borders derived from the screen layout")
+    ly.add_argument("--screens", help="screen layout TOML (default: ~/.config/openaten/screens.toml)")
+    ly.set_defaults(fn=cmd_layout)
     ct = sub.add_parser("ctl", help="control the running daemon")
     ct.add_argument("command", choices=["status", "on", "off", "toggle", "quit"])
     ct.set_defaults(fn=cmd_ctl)

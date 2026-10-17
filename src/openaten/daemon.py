@@ -122,7 +122,7 @@ class Daemon:
             return dict(self._snap)
 
     def _build_status(self) -> dict:
-        r = self.runner.status() if self.runner is not None else {"forwarding": False, "pending": False, "devices": [], "hotkey": self.hotkey, "error": None}
+        r = self.runner.status() if self.runner is not None else {"forwarding": False, "pending": False, "devices": [], "hotkey": self.hotkey, "edges": "off", "error": None}
         try:
             present = bool(self._candidates()) if self._end is None else True
             bridge = "present" if present else "absent"
@@ -136,6 +136,7 @@ class Daemon:
             "forwarding": bool(r["forwarding"]),
             "pending": bool(r["pending"]),
             "hotkey": r.get("hotkey", self.hotkey),
+            "edges": r.get("edges", "off"),
             "devices": r["devices"],
             "error": r.get("error") or self.error,
         }
