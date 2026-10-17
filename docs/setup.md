@@ -57,3 +57,11 @@ computer needs no OpenATEN software for this: it sees an ordinary USB keyboard a
 
 Also recommended: stop the kernel from probing the bridge's storage function (see [hardware.md](hardware.md)):
 `boot.kernelParams = [ "usb-storage.quirks=05e3:0627:i" ];` on NixOS.
+
+## Background daemon and Noctalia widget
+
+`openaten daemon` owns the input forwarder and publishes `$XDG_RUNTIME_DIR/openaten/status.json`; `openaten ctl {status,on,off,toggle,quit}`
+controls it over `ctl.sock`. The bridge end is only claimed while forwarding is on. Build with `nix build .#default` (or `nix run . -- daemon`).
+
+A Noctalia v5 bar widget lives in the `stags/openaten` plugin of the personal plugin repo: it shows bridge/forwarding state and toggles on click
+(add `stags/openaten:widget` to a bar). The widget runs `openaten ctl toggle`, so `openaten` must be on the shell's PATH.
