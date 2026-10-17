@@ -24,7 +24,7 @@ KEY_NAMES = {
     **{ch: code for ch, code in zip("asdfghjkl", range(30, 39))},
     **{ch: code for ch, code in zip("zxcvbnm", range(44, 51))},
 }
-DEFAULT_HOTKEY = "ctrl+alt+scrolllock"
+DEFAULT_HOTKEY = "ctrl+alt+shift+k"
 
 
 def parse_hotkey(spec: str) -> tuple[frozenset[int], int]:

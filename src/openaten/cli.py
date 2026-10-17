@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from .forward import DEFAULT_HOTKEY
 import os
 import sys
 import threading
@@ -246,13 +247,13 @@ def main(argv: list[str] | None = None) -> int:
     lk.set_defaults(fn=cmd_link)
     fw = sub.add_parser("forward", help="forward this computer's keyboard/mouse to the other computer (hotkey toggles)")
     fw.add_argument("--port", help="USB port path of the end to inject through (default: first end)")
-    fw.add_argument("--hotkey", default="ctrl+alt+scrolllock", help="chord that toggles forwarding")
+    fw.add_argument("--hotkey", default=DEFAULT_HOTKEY, help="chord that toggles forwarding")
     fw.add_argument("--dry-run", action="store_true", help="print the reports instead of grabbing devices and injecting")
     fw.add_argument("--max-active", type=float, default=0, help="safety: return control after this many seconds (0 = never)")
     fw.set_defaults(fn=cmd_forward)
     dm_ = sub.add_parser("daemon", help="background service: forwarder + status file + control socket (for the Noctalia widget)")
     dm_.add_argument("--port", help="USB port path of the end to inject through (default: first end)")
-    dm_.add_argument("--hotkey", default="ctrl+alt+scrolllock", help="chord that toggles forwarding")
+    dm_.add_argument("--hotkey", default=DEFAULT_HOTKEY, help="chord that toggles forwarding")
     dm_.add_argument("--max-active", type=float, default=0, help="safety: return control after this many seconds (0 = never)")
     dm_.set_defaults(fn=cmd_daemon)
     ct = sub.add_parser("ctl", help="control the running daemon")

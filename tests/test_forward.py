@@ -25,7 +25,7 @@ def chord(f):
 
 def make(keys_down=None):
     sent, states = [], []
-    return Forwarder(sent.append, on_state=states.append, keys_down=keys_down), sent, states
+    return Forwarder(sent.append, hotkey="ctrl+alt+scrolllock", on_state=states.append, keys_down=keys_down), sent, states
 
 
 def test_parse_hotkey():

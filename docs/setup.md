@@ -44,7 +44,7 @@ power-cycle the switch.
 ```sh
 pip install evdev                                  # or: nix develop (includes it)
 openaten forward --dry-run                         # prints the HID reports; nothing is grabbed or injected
-openaten forward --max-active 600                  # real run; ctrl+alt+scrolllock toggles; auto-returns control after 10 min
+openaten forward --max-active 600                  # real run; ctrl+alt+shift+k toggles; auto-returns control after 10 min
 ```
 
 Reading and grabbing keyboards and mice needs access to `/dev/input/event*`: add your user to the `input` group
@@ -52,7 +52,7 @@ Reading and grabbing keyboards and mice needs access to `/dev/input/event*`: add
 this desktop. The grab only starts after every key and button is physically released (press the hotkey, then let go of all keys), and
 it ends only once everything is released again; otherwise the desktop would miss a key release and show stuck modifiers. Turning forwarding
 off (or any exit) releases every key and button on the other computer at once. If a modifier ever does look stuck, tap Ctrl, Shift, Alt and Super once.
-Avoid hotkeys that other programs use (for example `ctrl+g`); the default is `ctrl+alt+scrolllock`. The other
+Avoid hotkeys that other programs use (for example `ctrl+g`); the default is `ctrl+alt+shift+k`. The other
 computer needs no OpenATEN software for this: it sees an ordinary USB keyboard and mouse.
 
 Also recommended: stop the kernel from probing the bridge's storage function (see [hardware.md](hardware.md)):
