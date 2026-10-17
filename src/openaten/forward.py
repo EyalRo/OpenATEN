@@ -1,6 +1,6 @@
 """Forward this computer's keyboard and mouse to the other computer through the bridge's HID interface.
 
-The other computer needs no software: it sees an ordinary USB keyboard and mouse. A hotkey toggles forwarding; while it is on, the local
+The other computer sees an ordinary USB keyboard and mouse (its OpenATEN agent is only needed for hand-off at screen edges). A hotkey toggles forwarding; while it is on, the local
 devices are grabbed (so nothing reaches this desktop) and every event becomes a HID report.
 
 :class:`Forwarder` is the testable core (no device access). :func:`run_evdev` is the thin Linux layer around it.
@@ -226,6 +226,11 @@ class EvdevRunner:
         if on:
             self.error = None
         self.fwd.request(on)
+
+    def border_pushed(self, key: str, row: float) -> None:
+        """An external edge source (the strip) reports the pointer pushed through border ``key`` at ``row``: start forwarding."""
+        if self.edges is not None and self.edges.border_pushed(key, row):
+            self.fwd.request(True)
 
     def status(self) -> dict:
         return {

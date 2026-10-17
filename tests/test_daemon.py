@@ -136,3 +136,87 @@ def test_quit_stops_the_loop(tmp_path):
 def test_runtime_dir_prefers_xdg(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     assert dm.runtime_dir() == tmp_path / "openaten"
+
+
+class FakeLink:
+    def __init__(self, end, master, on_message, on_error):
+        self.end, self.master, self.on_message, self.on_error = end, master, on_message, on_error
+        self.hid, self.messages, self.started, self.stopped = [], [], False, False
+
+    def start(self):
+        self.started = True
+
+    def stop(self, timeout=0):
+        self.stopped = True
+
+    def inject_hid(self, report):
+        self.hid.append(report)
+
+    def send_message(self, channel, data):
+        self.messages.append((channel, json.loads(data)))
+
+
+def make_linked(tmp_path, role="master"):
+    links = []
+
+    def mk_link(*a):
+        links.append(FakeLink(*a))
+        return links[-1]
+
+    d, runners, _ = make(tmp_path, role=role, make_link=mk_link)
+    d.dir.mkdir(exist_ok=True)
+    return d, runners, links
+
+
+def test_role_mode_keeps_the_end_and_injects_through_the_link(tmp_path, monkeypatch):
+    monkeypatch.setattr(dm, "RELEASE_AFTER", 0.0)
+    d, runners, links = make_linked(tmp_path)
+    d.run_once()
+    d.run_once()
+    assert links[0].started and links[0].master and d._end is not None  # held even when idle
+    d._send_report(b"x")
+    assert links[0].hid == [b"x"]
+    assert d.snapshot()["role"] == "master"
+
+
+def test_forwarding_start_and_stop_are_announced_to_the_peer(tmp_path):
+    d, runners, links = make_linked(tmp_path)
+    d.run_once()
+    d.commands.put("on")
+    d.run_once()
+    d.commands.put("off")
+    d.run_once()
+    assert [m for _, m in links[0].messages] == [{"kind": "take-control", "border": None, "row": None}, {"kind": "release"}]
+
+
+def test_peer_take_control_then_strip_enter_after_leaving_sends_give_back(tmp_path):
+    d, runners, links = make_linked(tmp_path)
+    d.run_once()
+    d.handoff.settle = 0.0
+    links[0].on_message(1, 1, json.dumps({"kind": "take-control", "border": "k", "row": 1.0}).encode())
+    d.commands.put(("edge", "k", 5.0, False))
+    d.commands.put(("edge", "k", 6.0, True))
+    d.run_once()
+    assert d.snapshot()["receiving"] is False
+    assert links[0].messages[-1] == (1, {"kind": "give-back", "border": "k", "row": 6.0})
+
+
+def test_peer_give_back_stops_forwarding(tmp_path):
+    d, runners, links = make_linked(tmp_path)
+    d.run_once()
+    d.commands.put("on")
+    d.run_once()
+    links[0].on_message(1, 2, json.dumps({"kind": "give-back", "border": "k", "row": 1.0}).encode())
+    d.run_once()
+    assert runners[0].requests[-1] is False
+
+
+def test_edge_command_over_the_socket(tmp_path):
+    d, runners, _ = make(tmp_path)
+    d.start_server()
+    try:
+        assert dm.request("edge", directory=tmp_path, border="k", row=3.0)["ok"] is True
+        assert dm.request("edge", directory=tmp_path, border="k")["ok"] is False
+        assert d.commands.get(timeout=2) == ("edge", "k", 3.0, True)
+    finally:
+        d._server.shutdown()

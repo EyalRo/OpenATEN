@@ -53,7 +53,7 @@ this desktop. The grab only starts after every key and button is physically rele
 it ends only once everything is released again; otherwise the desktop would miss a key release and show stuck modifiers. Turning forwarding
 off (or any exit) releases every key and button on the other computer at once. If a modifier ever does look stuck, tap Ctrl, Shift, Alt and Super once.
 Avoid hotkeys that other programs use (for example `ctrl+g`); the default is `ctrl+alt+shift+k`. The other
-computer needs no OpenATEN software for this: it sees an ordinary USB keyboard and mouse.
+computer needs no OpenATEN software to receive input: it sees an ordinary USB keyboard and mouse. (Edge hand-off, below, uses an agent on both.)
 
 ### Edge hand-off (push the pointer through the screen border)
 
@@ -86,16 +86,35 @@ height = 1200
 
 `openaten layout` prints the borders it derived. `openaten forward` and `openaten daemon` pick the file up automatically (or pass `--screens`).
 
-How it works and what to know:
+Two ways to detect the edge push, chosen with `source` in the layout file:
 
-- niri cannot report the pointer position and the other computer runs no software, so each side's pointer is tracked from relative motion. Set
-  `accel-profile "flat"` for pointers in niri's `input` config **on both computers**, otherwise the tracking drifts.
-- After starting, push the pointer into a screen edge once (the status shows `edges: "calibrating"` until then); clamping at the edge gives the position.
-- When control switches, the other pointer is slammed into its top-left corner and moved to the matching row, so entry is only as accurate as the
-  other computer's flat-profile motion. Pushing back through the border returns control. The local pointer stays where it left, so it comes back at the row where
-  it went out, not at the row where the other pointer returned.
-- Only mice drive the edge detection. Touchpads still forward, but cannot trigger a switch (the hotkey and the Noctalia button always work).
-- Several local screens work as long as they are listed; the other computer's pointer position is exact only for the single-screen case.
+- `source = "motion"` (default): each computer's pointer position is dead-reckoned from relative motion. It needs no extra software but is approximate:
+  set `accel-profile "flat"` for pointers in niri's `input` config on both computers, push the pointer into a screen edge once after starting
+  (status shows `edges: "calibrating"` until then), and the entry row on the other computer is only as accurate as its flat-profile motion.
+- `source = "strip"`: exact. Both computers run `openaten daemon --role ...` plus `openaten strip` (below). Invisible 1-pixel layer-shell strips along each
+  shared border report the exact row where the pointer enters, the agents hand control over with messages on the link, and the receiving
+  agent hands it back when its own pointer pushes back through the border. No calibration, no `scale` settings, no flat-acceleration requirement
+  (the receiving pointer is still positioned by a HID slam to its top-left corner and move to the row, so entry still assumes a flat profile there).
+
+Running the exact mode on both computers (the same `screens.toml`, `source = "strip"`):
+
+```sh
+openaten daemon --role master     # on one computer; --role slave on the other. Holds the bridge end and the link all the time.
+openaten-strip                    # `nix run .#strip`; GTK4 + gtk4-layer-shell, started from the niri session on each computer
+```
+
+Screen names in `screens.toml` must be the output connector names (`niri msg outputs`, e.g. `DP-1`, `eDP-1`) for the local screens. The strip was
+checked in a headless sway session (enter/leave with exact rows at the shared segment, nothing outside it); it has not been run under niri or with
+two real computers yet.
+
+What to know:
+
+- When control switches, the local pointer stays where it left (niri cannot warp it), so it comes back at the row where it went out, not at the row
+  where the other pointer returned.
+- In `motion` mode only mice drive the edge detection (touchpads still forward but cannot trigger a switch); in `strip` mode any pointer works.
+- The hotkey and the Noctalia button always work, in both modes.
+- In `strip` mode the bridge end is held permanently (the link needs it), so other tools cannot use it while the daemon runs.
+- Several local screens work as long as they are listed. In `motion` mode the other computer's pointer position is exact only for a single screen.
 
 Also recommended: stop the kernel from probing the bridge's storage function (see [hardware.md](hardware.md)):
 `boot.kernelParams = [ "usb-storage.quirks=05e3:0627:i" ];` on NixOS.

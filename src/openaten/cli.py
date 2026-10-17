@@ -251,12 +251,27 @@ def cmd_daemon(args) -> int:
         port_of=port_path,
         hotkey=args.hotkey,
         log=lambda m: print(m, flush=True),
+        role=args.role,
+        make_link=lambda end, master, on_message, on_error: LinkSession(UsbTransport(end), master, on_message, poll_idle=0.02, on_error=on_error),
     )
     import signal
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: d.stop_flag.set())
     return d.run()
+
+
+def cmd_strip(args) -> int:
+    """Run the border strips (needs GTK4 and gtk4-layer-shell): report pointer enter/leave on each border to the running daemon."""
+    from . import edges, strip
+
+    path = Path(args.screens) if args.screens else edges.default_path()
+    try:
+        sw = edges.load(path)
+    except (ValueError, OSError) as e:
+        print(f"{path}: {e}")
+        return 1
+    return strip.run(sw)
 
 
 def cmd_ctl(args) -> int:
@@ -343,8 +358,12 @@ def main(argv: list[str] | None = None) -> int:
     dm_.add_argument("--port", help="USB port path of the end to inject through (default: first end)")
     dm_.add_argument("--hotkey", default=DEFAULT_HOTKEY, help="chord that toggles forwarding")
     dm_.add_argument("--max-active", type=float, default=0, help="safety: return control after this many seconds (0 = never)")
+    dm_.add_argument("--role", choices=["master", "slave"], help="keep a link to the other computer's agent (run master on one computer, slave on the other); needed for the strip's exact hand-off")
     dm_.add_argument("--screens", help="screen layout TOML for edge hand-off (default: ~/.config/openaten/screens.toml if it exists)")
     dm_.set_defaults(fn=cmd_daemon)
+    sp = sub.add_parser("strip", help="invisible border strips that report the exact pointer position at the shared screen borders")
+    sp.add_argument("--screens", help="screen layout TOML (default: ~/.config/openaten/screens.toml)")
+    sp.set_defaults(fn=cmd_strip)
     ly = sub.add_parser("layout", help="show the borders derived from the screen layout")
     ly.add_argument("--screens", help="screen layout TOML (default: ~/.config/openaten/screens.toml)")
     ly.set_defaults(fn=cmd_layout)

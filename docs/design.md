@@ -14,7 +14,7 @@ are verified to work, and design the rest ourselves.
 
 - **Data channel** with strict turn-taking: 2 ms round trips; up to ~116 MB/s one-way with 2 MiB messages.
 - **Input injection** (`HID` command): the receiving computer sees an ordinary USB keyboard/mouse, so no software is
-  needed on the receiving side for sending input.
+  needed on the receiving side to receive input (hand-off at screen edges does use the agent there, see setup.md).
 
 ## Link layer: master-driven polling
 

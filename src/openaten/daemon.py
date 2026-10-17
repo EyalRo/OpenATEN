@@ -5,7 +5,7 @@ Files (in ``$XDG_RUNTIME_DIR/openaten/``, mode 0700):
 * ``status.json``  rewritten atomically whenever the status changes and at least every ``HEARTBEAT`` seconds (``ts`` shows liveness)
 * ``ctl.sock``     one JSON request per connection, e.g. ``{"cmd": "toggle"}``; the reply is the status as one JSON line
 
-Commands: ``status``, ``on``, ``off``, ``toggle``, ``quit``. Status ``bridge`` is ``present`` (a bridge end is enumerated), ``absent`` or
+Commands: ``status``, ``on``, ``off``, ``toggle``, ``quit``, and ``edge`` (``border``, ``row``, ``enter``: reported by ``openaten strip``). Status ``bridge`` is ``present`` (a bridge end is enumerated), ``absent`` or
 ``error``; the bridge end is only claimed while forwarding is on or pending, so other tools can use it the rest of the time.
 """
 from __future__ import annotations
@@ -18,6 +18,8 @@ import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional
+
+from . import control
 
 HEARTBEAT = 2.0
 RELEASE_AFTER = 2.0  # give the bridge end back this long after forwarding turned off
@@ -44,6 +46,14 @@ class _Handler(socketserver.StreamRequestHandler):
             cmd = req.get("cmd", "status")
         except (ValueError, AttributeError):
             self.wfile.write(b'{"ok": false, "error": "bad request"}\n')
+            return
+        if cmd == "edge":
+            try:
+                daemon.commands.put(("edge", str(req["border"]), float(req["row"]), bool(req.get("enter", True))))
+            except (KeyError, TypeError, ValueError):
+                self.wfile.write(b'{"ok": false, "error": "edge needs border and row"}\n')
+                return
+            self.wfile.write(json.dumps(dict(daemon.snapshot(), ok=True)).encode() + b"\n")
             return
         if cmd not in ("status", "on", "off", "toggle", "quit"):
             self.wfile.write(json.dumps({"ok": False, "error": f"unknown command {cmd!r}"}).encode() + b"\n")
@@ -74,11 +84,20 @@ class Daemon:
         hotkey: str = "",
         log: Callable[[str], None] = print,
         directory: Optional[Path] = None,
+        role: Optional[str] = None,
+        make_link: Optional[Callable[..., object]] = None,
     ):
         self.dir = directory or runtime_dir()
         self.make_runner, self.find_ends, self.open_end = make_runner, find_ends, open_end
         self.port, self.port_of, self.hotkey, self.log = port, port_of, hotkey, log
-        self.commands: "queue.Queue[str]" = queue.Queue()
+        self.commands: "queue.Queue" = queue.Queue()
+        self.role, self.make_link = role, make_link
+        self.link = None  # persistent link session (role mode): HID reports and hand-off messages ride on it
+        self._link_error: Optional[str] = None
+        self._link_retry_at = 0.0
+        self.handoff = control.Handoff(self._push, self._pull, self._send_control)
+        self._pending: Optional[tuple[str, float]] = None  # border/row of a push waiting for forwarding to start
+        self._was_forwarding = False
         self.runner = None
         self._end = None
         self._end_idle_since: Optional[float] = None
@@ -96,7 +115,10 @@ class Daemon:
         return [d for d in ends if not self.port or self.port_of(d) == self.port]
 
     def _send_report(self, report: bytes) -> None:
-        """Inject a HID report, claiming the bridge end on first use."""
+        """Inject a HID report (through the link in role mode), claiming the bridge end on first use."""
+        if self.link is not None:
+            self.link.inject_hid(report)
+            return
         if self._end is None:
             cands = self._candidates()
             if not cands:
@@ -107,6 +129,60 @@ class Daemon:
         except Exception:
             self._close_end()  # re-open on the next report (the switch may have re-enumerated)
             raise
+
+    # -- link and hand-off ----------------------------------------------------------------
+    def _push(self, border: str, row: float) -> None:
+        self._pending = (border, row)
+        if hasattr(self.runner, "border_pushed"):
+            self.runner.border_pushed(border, row)
+
+    def _pull(self) -> None:
+        self.runner.request(False)
+
+    def _send_control(self, data: bytes) -> None:
+        if self.link is not None:
+            self.link.send_message(control.CH_CONTROL, data)
+
+    def _on_link_message(self, channel: int, msg_id: int, data: bytes) -> None:
+        msg = control.decode(data) if channel == control.CH_CONTROL else None
+        if msg is not None:
+            self.commands.put(("peer", msg))
+
+    def _on_link_error(self, e: Exception) -> None:
+        self._link_error = f"link: {e}"
+
+    def _ensure_link(self) -> None:
+        """Role mode: keep the bridge end claimed and a link session running (restarted after errors)."""
+        if self.role is None or self.make_link is None:
+            return
+        if self.link is not None and self._link_error is None:
+            return
+        now = time.monotonic()
+        if now < self._link_retry_at:
+            return
+        self._link_retry_at = now + 2.0
+        self._drop_link()
+        try:
+            cands = self._candidates()
+            if not cands:
+                raise RuntimeError("no bridge end connected")
+            self._end = self.open_end(cands[0])
+            self._link_error = None
+            self.link = self.make_link(self._end, self.role == "master", self._on_link_message, self._on_link_error)
+            self.link.start()
+            self.log(f"link up as {self.role}")
+        except Exception as e:
+            self._drop_link()
+            self._link_error = f"link: {e}"
+
+    def _drop_link(self) -> None:
+        link, self.link = self.link, None
+        if link is not None:
+            try:
+                link.stop(timeout=3.0)
+            except Exception:
+                pass
+        self._close_end()
 
     def _close_end(self) -> None:
         end, self._end = self._end, None
@@ -138,7 +214,9 @@ class Daemon:
             "hotkey": r.get("hotkey", self.hotkey),
             "edges": r.get("edges", "off"),
             "devices": r["devices"],
-            "error": r.get("error") or self.error,
+            "role": self.role,
+            "receiving": self.handoff.receiving,
+            "error": r.get("error") or self.error or self._link_error,
         }
 
     def _publish(self, force: bool = False) -> None:
@@ -170,22 +248,36 @@ class Daemon:
             self.runner = self.make_runner(self._send_report)
             if not self.runner.open():
                 self.error = "no readable keyboard/mouse devices (is the user in the 'input' group?)"
+        self._ensure_link()
         while True:
             try:
                 cmd = self.commands.get_nowait()
             except queue.Empty:
                 break
-            if cmd == "quit":
+            if isinstance(cmd, tuple):
+                if cmd[0] == "edge":
+                    self.handoff.edge(cmd[1], cmd[2], cmd[3])
+                elif cmd[0] == "peer":
+                    self.handoff.message(cmd[1])
+            elif cmd == "quit":
                 self.stop_flag.set()
             elif cmd == "toggle":
                 self.runner.request(None)
             else:
                 self.runner.request(cmd == "on")
         self.runner.step(timeout)
-        busy = self.runner.status()["forwarding"] or self.runner.status()["pending"]
+        forwarding = self.runner.status()["forwarding"]
+        if forwarding != self._was_forwarding:
+            self._was_forwarding = forwarding
+            if forwarding:
+                self.handoff.started(*(self._pending or (None, None)))
+            else:
+                self.handoff.stopped()
+            self._pending = None
+        busy = forwarding or self.runner.status()["pending"]
         if busy:
             self._end_idle_since = None
-        elif self._end is not None:
+        elif self._end is not None and self.link is None:
             now = time.monotonic()
             self._end_idle_since = self._end_idle_since or now
             if now - self._end_idle_since >= RELEASE_AFTER:
@@ -203,6 +295,7 @@ class Daemon:
         finally:
             if self.runner is not None:
                 self.runner.close()
+            self._drop_link()
             self._close_end()
             if self._server is not None:
                 self._server.shutdown()
@@ -214,15 +307,15 @@ class Daemon:
         return 0
 
 
-def request(cmd: str, timeout: float = 2.0, directory: Optional[Path] = None) -> dict:
-    """Client side: send one command to the running daemon and return its status reply."""
+def request(cmd: str, timeout: float = 2.0, directory: Optional[Path] = None, **fields) -> dict:
+    """Client side: send one command (with optional fields) to the running daemon and return its status reply."""
     import socket
 
     path = (directory or runtime_dir()) / "ctl.sock"
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
         s.settimeout(timeout)
         s.connect(str(path))
-        s.sendall(json.dumps({"cmd": cmd}).encode() + b"\n")
+        s.sendall(json.dumps({"cmd": cmd, **fields}).encode() + b"\n")
         data = b""
         while not data.endswith(b"\n"):
             chunk = s.recv(4096)

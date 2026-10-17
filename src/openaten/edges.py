@@ -139,7 +139,18 @@ class PointerTracker:
 class EdgeSwitch:
     """Hand-off between this computer's screens and the other's. See the module docstring for the model and its limits."""
 
-    def __init__(self, screens: list[Screen], local_host: str, local_scale: float = 1.0, remote_scale: float = 1.0, push: float = 40.0):
+    def __init__(
+        self,
+        screens: list[Screen],
+        local_host: str,
+        local_scale: float = 1.0,
+        remote_scale: float = 1.0,
+        push: float = 40.0,
+        source: str = "motion",
+    ):
+        if source not in ("motion", "strip"):
+            raise ValueError("source must be 'motion' (dead-reckoned from mouse motion) or 'strip' (reported by `openaten strip`)")
+        self.source = source
         local = [s for s in screens if s.host == local_host]
         remote = [s for s in screens if s.host != local_host]
         if not local or not remote:
@@ -147,6 +158,9 @@ class EdgeSwitch:
         self.pairs = borders(screens, local_host)
         if not self.pairs:
             raise ValueError("no local screen shares a border with a remote screen: check x/y/width/height (edges must touch exactly)")
+        host_of = {s.name: s.host for s in remote}
+        # a.far is the remote screen, b.far the local one; sorted so both computers derive the same key
+        self.keys = ["~".join(sorted((f"{local_host}:{b.far}", f"{host_of[a.far]}:{a.far}"))) for a, b in self.pairs]
         self.local = PointerTracker(local, local_scale, [p[0] for p in self.pairs], push)
         self.remote = PointerTracker(remote, remote_scale, [p[1] for p in self.pairs], push)
         self._exit: tuple[int, float] | None = None  # border index and position along it where we left
@@ -157,6 +171,8 @@ class EdgeSwitch:
 
     def local_motion(self, events) -> bool:
         """Feed raw events of a mouse while the pointer is on this computer. True when it pushed through a border to the other computer."""
+        if self.source != "motion":
+            return False
         for etype, code, value in events:
             if etype == H.EV_REL and code in (H.REL_X, H.REL_Y):
                 i = self.local.move(value if code == H.REL_X else 0, value if code == H.REL_Y else 0)
@@ -165,6 +181,14 @@ class EdgeSwitch:
                     self._exit = (i, self.local.lo[1 - edge.axis])
                     return True
         return False
+
+    def border_pushed(self, key: str, row: float) -> bool:
+        """An external source (the strip) reports the pointer at ``row`` on border ``key``. False if the key is unknown."""
+        if key not in self.keys:
+            return False
+        i = self.keys.index(key)
+        self._exit = (i, row)
+        return True
 
     def entering(self) -> list[bytes]:
         """Called when forwarding starts: reports that put the other computer's pointer at the border we crossed (none after a hotkey)."""
@@ -194,6 +218,8 @@ class EdgeSwitch:
 
     def remote_report(self, report: bytes) -> bool:
         """Feed a mouse report just sent to the other computer. True when its pointer pushed back through the border."""
+        if self.source != "motion":
+            return False  # the other agent reports it: see control.Handoff
         if len(report) == 5 and report[0] == 1:
             dx, dy = (b - 256 if b > 127 else b for b in report[3:5])
             return self.remote.move(dx, dy) is not None
@@ -219,4 +245,4 @@ def load(path: Path, local: str | None = None) -> EdgeSwitch:
         screens = [Screen(str(s["name"]), str(s["host"]), s["x"], s["y"], s["width"], s["height"]) for s in cfg.get("screen", [])]
     except KeyError as e:
         raise ValueError(f"{path}: every [[screen]] needs name, host, x, y, width and height (missing {e.args[0]})") from None
-    return EdgeSwitch(screens, host, float(cfg.get("local_scale", 1.0)), float(cfg.get("remote_scale", 1.0)), float(cfg.get("push", 40.0)))
+    return EdgeSwitch(screens, host, float(cfg.get("local_scale", 1.0)), float(cfg.get("remote_scale", 1.0)), float(cfg.get("push", 40.0)), str(cfg.get("source", "motion")))
