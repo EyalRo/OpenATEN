@@ -48,7 +48,7 @@ def test_hotkey_toggles_and_is_not_forwarded():
     chord(f)
     assert f.forwarding and states == [True] and sent == []  # the chord itself produces no reports
     f.handle([press(A), release(A)])
-    assert sent == [bytes([0, 0, 0x04, 0, 0, 0, 0, 0]), bytes(8)]
+    assert sent == [bytes([2, 0, 0x04, 0, 0, 0, 0, 0]), bytes([2, 0, 0, 0, 0, 0, 0, 0])]
     chord(f)
     assert not f.forwarding and states == [True, False]
 
@@ -70,7 +70,7 @@ def test_ungrab_waits_until_every_key_is_up_but_peer_is_released_at_once():
     f.handle([press(A), (hid.EV_KEY, hid.BTN_LEFT, 1), (hid.EV_SYN, 0, 0)])
     sent.clear()
     f.handle(CHORD_DOWN)  # turn off
-    assert bytes(8) in sent and bytes(5) in sent  # the other computer's keys/buttons are released immediately
+    assert bytes([2, 0, 0, 0, 0, 0, 0, 0]) in sent and bytes([1, 0, 0, 0, 0]) in sent  # the other computer's keys/buttons are released at once
     assert f.active and states == [True]  # ...but the grab stays while keys are physically down
     f.handle(CHORD_UP + [release(A)])
     assert f.active  # the mouse button is still down
@@ -99,7 +99,7 @@ def test_mouse_motion_is_forwarded_when_active():
     f, sent, _ = make()
     chord(f)
     f.handle([(hid.EV_REL, hid.REL_X, 4), (hid.EV_REL, hid.REL_Y, 2), (hid.EV_SYN, 0, 0)])
-    assert sent == [bytes([0, 4, 2, 0, 0])]
+    assert sent == [bytes([1, 0, 0, 4, 2])]
 
 
 def test_partial_chord_does_not_toggle():
@@ -114,7 +114,7 @@ def test_stop_always_releases_even_with_keys_down():
     f.handle([press(A)])
     sent.clear()
     f.stop()
-    assert not f.active and states == [True, False] and bytes(8) in sent
+    assert not f.active and states == [True, False] and bytes([2, 0, 0, 0, 0, 0, 0, 0]) in sent
     f.stop()
     assert states == [True, False]
 
@@ -127,7 +127,7 @@ def test_touchpad_events_are_forwarded_as_mouse_motion_and_block_the_grab_while_
     assert f.forwarding
     f.handle([(hid.EV_KEY, BTN_TOUCH, 1), (EV_ABS, ABS_X, 10), (EV_ABS, ABS_Y, 10), (hid.EV_SYN, 0, 0),
               (EV_ABS, ABS_X, 30), (EV_ABS, ABS_Y, 10), (hid.EV_SYN, 0, 0)], source="pad", touchpad=True)
-    assert sent and sent[-1][1] > 0  # moved right
+    assert sent and sent[-1][3] > 0  # moved right (dx is the fourth byte)
     sent.clear()
     f.handle(CHORD_DOWN)  # toggle off while the finger is still on the pad
     f.handle(CHORD_UP)

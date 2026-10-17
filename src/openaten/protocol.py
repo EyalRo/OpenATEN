@@ -108,11 +108,18 @@ def chg_orien(layout: int, flag: int) -> bytes:
     return packet(T_CHG_ORIEN, bytes([layout, flag]))
 
 
+MOUSE_REPORT_ID, KEYBOARD_REPORT_ID = 1, 2
+
+
 def mouse_report(buttons: int = 0, dx: int = 0, dy: int = 0, wheel: int = 0, pan: int = 0) -> bytes:
-    """5-byte boot-style mouse report as accepted by CMD_HID."""
-    return struct.pack("<Bbbbb", buttons, dx, dy, wheel, pan)
+    """5-byte mouse report for CMD_HID: ``[id=1, buttons, wheel, dx, dy]``.
+
+    This is the layout of the bridge's HID report descriptor (report ID 1, five buttons, then wheel, X, Y as signed bytes);
+    note the wheel comes *before* X/Y and there is no horizontal scroll, so ``pan`` is accepted but ignored.
+    """
+    return bytes([MOUSE_REPORT_ID, buttons & 0x1F, wheel & 0xFF, dx & 0xFF, dy & 0xFF])
 
 
 def key_report(mods: int = 0, *keys: int) -> bytes:
-    """8-byte boot keyboard report as accepted by CMD_HID (up to 6 simultaneous keys)."""
-    return bytes([mods, 0, *keys[:6]]).ljust(8, b"\0")
+    """8-byte keyboard report for CMD_HID: ``[id=2, modifiers, key1..key6]`` (no reserved byte)."""
+    return bytes([KEYBOARD_REPORT_ID, mods, *keys[:6]]).ljust(8, b"\0")

@@ -48,6 +48,6 @@ def test_mouse_cross_layout():
 
 
 def test_hid_reports():
-    assert pr.mouse_report(0, 5, 0, 0, 0) == bytes([0, 5, 0, 0, 0])
-    assert pr.key_report(0, 0x04) == bytes([0, 0, 4, 0, 0, 0, 0, 0])
+    assert pr.mouse_report(0, 5, 0, 0, 0) == bytes([1, 0, 0, 5, 0])  # [id, buttons, wheel, dx, dy]
+    assert pr.key_report(0, 0x04) == bytes([2, 0, 4, 0, 0, 0, 0, 0])  # [id, modifiers, key1..key6]
     assert len(pr.key_report(2, 1, 2, 3, 4, 5, 6, 7)) == 8

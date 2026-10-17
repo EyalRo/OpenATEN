@@ -91,8 +91,16 @@ Details and measurements: [hardware.md](hardware.md#flow-control-strict-turn-tak
 
 ## HID reports
 
-Standard boot-protocol reports: mouse `buttons, dx, dy, wheel, pan` (5 bytes, signed deltas); keyboard
-`modifiers, reserved, key1..key6` (8 bytes). **[verified]**
+The bridge's HID interface has a report descriptor with **report IDs**, so the injected bytes must include them. **[verified: the kernel emits
+the matching input events on the receiving end]**
+
+| Device | Bytes | Layout |
+|---|---|---|
+| Mouse | 5 | `01  buttons  wheel  dx  dy`: report ID 1, five button bits in the low bits of `buttons`, then **wheel before X/Y**, all signed 8-bit; no horizontal scroll |
+| Keyboard | 8 | `02  modifiers  key1 .. key6`: report ID 2, modifier bitmask (LCtrl=1, LShift=2, LAlt=4, LGui=8, RCtrl=0x10, ...), six USB key usages; no reserved byte |
+
+Earlier versions of this document (and of the library) used the generic boot-protocol layout without report IDs; the kernel silently dropped such
+reports even though the raw bytes still arrived intact at the interrupt endpoint, so raw-endpoint tests alone are not enough.
 
 ## Timing hints (inferred from the vendor software)
 

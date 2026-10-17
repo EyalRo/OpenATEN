@@ -1,7 +1,8 @@
 """Translate Linux input events into the USB HID boot reports the bridge injects on the peer.
 
 Pure logic, no device access: feed it ``(type, code, value)`` tuples (the shape evdev yields) and it returns reports.
-Mouse report: 5 bytes (buttons, dx, dy, wheel, pan). Keyboard report: 8 bytes (modifiers, reserved, up to 6 key usages).
+Mouse report: 5 bytes ``[1, buttons, wheel, dx, dy]``. Keyboard report: 8 bytes ``[2, modifiers, up to 6 key usages]``. (The leading byte is
+the HID report ID of the bridge's descriptor; there is no horizontal scroll.)
 """
 from __future__ import annotations
 
@@ -63,7 +64,7 @@ class Keyboard:
 
     def report(self) -> bytes:
         slots = self.keys[:6] if len(self.keys) <= 6 else [ROLLOVER] * 6
-        return bytes([self.mods, 0, *slots]).ljust(8, b"\0")
+        return bytes([2, self.mods, *slots]).ljust(8, b"\0")
 
     def release_all(self) -> bytes | None:
         """Report with nothing held, or None if nothing was held."""
@@ -115,7 +116,7 @@ class Mouse:
         while True:
             sx, sy = max(-127, min(127, dx)), max(-127, min(127, dy))
             sw, sp = max(-127, min(127, wheel)), max(-127, min(127, pan))
-            out.append(bytes([self.buttons, sx & 0xFF, sy & 0xFF, sw & 0xFF, sp & 0xFF]))
+            out.append(bytes([1, self.buttons, sw & 0xFF, sx & 0xFF, sy & 0xFF]))
             dx, dy, wheel, pan = dx - sx, dy - sy, wheel - sw, pan - sp
             if not (dx or dy or wheel or pan):
                 return out
@@ -124,7 +125,7 @@ class Mouse:
         if not self.buttons:
             return None
         self.buttons = 0
-        return bytes(5)
+        return bytes([1, 0, 0, 0, 0])
 
 
 class Translator:
@@ -204,8 +205,8 @@ class Touchpad:
                 yield from self.mouse.flush()
                 if self._tap_pending:
                     self._tap_pending = False
-                    yield bytes([1, 0, 0, 0, 0])  # tap: left down...
-                    yield bytes(5)  # ...and up
+                    yield bytes([1, 1, 0, 0, 0])  # tap: left down...
+                    yield bytes([1, 0, 0, 0, 0])  # ...and up
 
     def _touch(self, down: bool) -> None:
         if down:
