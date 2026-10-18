@@ -1,0 +1,4 @@
+{
+  "settings.openaten_path.label": "openaten command",
+  "settings.openaten_path.description": "Path to the openaten binary the widget uses to toggle forwarding (`openaten ctl`)."
+}
