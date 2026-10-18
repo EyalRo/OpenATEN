@@ -20,6 +20,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from . import protocol as pr
+
 SLOT = 2048  # wire lengths are multiples of this; also the default frame size
 MAGIC = b"OATN"
 VERSION = 1
@@ -139,7 +141,7 @@ class LinkSession:
         self._peer_busy = False
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self.stats = dict(frames_tx=0, frames_rx=0, resyncs=0, bytes_tx=0, bytes_rx=0, bad_frames=0, hid_sent=0, hid_errors=0)
+        self.stats = dict(frames_tx=0, frames_rx=0, resyncs=0, bytes_tx=0, bytes_rx=0, bad_frames=0, hid_sent=0, hid_errors=0, hid_coalesced=0)
 
     # ---- public API ------------------------------------------------------------------
     def start(self) -> None:
@@ -239,6 +241,11 @@ class LinkSession:
     def _flush_hid(self) -> None:
         """Inject queued HID reports. They are separate commands and may run between any two exchanges."""
         hid = getattr(self.t, "hid", None)
+        if len(self._hid) > 1:  # a backlog from a fast mouse: send the same motion in fewer commands
+            pending = [self._hid.popleft() for _ in range(len(self._hid))]  # only this thread pops; others append
+            merged = pr.coalesce_mouse(pending)
+            self.stats["hid_coalesced"] += len(pending) - len(merged)
+            self._hid.extendleft(reversed(merged))  # back in front of anything queued meanwhile
         while self._hid and hid is not None:
             report = self._hid.popleft()
             try:

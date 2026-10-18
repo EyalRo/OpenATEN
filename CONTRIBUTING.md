@@ -25,6 +25,9 @@ CI runs the same checks on Python 3.10-3.12. The tests use a fake transport that
 
 Keep lower layers free of imports from higher ones, and keep hardware access behind the `Transport` / bridge-end seams so the logic stays testable.
 
+Architecture notes are in [docs/architecture.md](docs/architecture.md); design decisions are recorded in [docs/adr/](docs/adr/). The roadmap lives
+in [docs/design.md](docs/design.md); individual tasks are GitHub issues.
+
 ## Conventions
 
 - Logging uses `logging.getLogger(__name__)` with standard levels; no `print` except for command output.

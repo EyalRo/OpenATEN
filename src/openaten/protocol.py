@@ -120,6 +120,58 @@ def mouse_report(buttons: int = 0, dx: int = 0, dy: int = 0, wheel: int = 0, pan
     return bytes([MOUSE_REPORT_ID, buttons & 0x1F, wheel & 0xFF, dx & 0xFF, dy & 0xFF])
 
 
+def _split_axis(total: int) -> list[int]:
+    """Signed-byte steps that add up to ``total`` (a single step when it fits)."""
+    steps = []
+    while total:
+        step = max(-127, min(127, total))
+        steps.append(step)
+        total -= step
+    return steps
+
+
+def coalesce_mouse(reports: list[bytes]) -> list[bytes]:
+    """Merge runs of consecutive mouse reports that share a button state into as few reports as carry the same motion.
+
+    Relative motion and wheel are summed (split again when a sum exceeds a signed byte), so a backlog from a fast mouse costs
+    fewer bridge commands without changing the pointer's path end points. Reports of any other kind, and any change of button
+    state, keep their position and are never merged across.
+    """
+    out: list[bytes] = []
+    run: list[int] | None = None  # [buttons, wheel, dx, dy] of the mouse run being merged
+
+    def flush() -> None:
+        nonlocal run
+        if run is None:
+            return
+        buttons, wheel, dx, dy = run
+        parts = [_split_axis(wheel), _split_axis(dx), _split_axis(dy)]
+        for i in range(max(1, *(len(a) for a in parts))):
+            w, x, y = (a[i] if i < len(a) else 0 for a in parts)
+            out.append(mouse_report(buttons, x, y, w))
+        run = None
+
+    for r in reports:
+        if len(r) == 5 and r[0] == MOUSE_REPORT_ID:
+            buttons, wheel, dx, dy = r[1], _s8(r[2]), _s8(r[3]), _s8(r[4])
+            if run is not None and run[0] == buttons:
+                run[1] += wheel
+                run[2] += dx
+                run[3] += dy
+            else:
+                flush()
+                run = [buttons, wheel, dx, dy]
+        else:
+            flush()
+            out.append(r)
+    flush()
+    return out
+
+
+def _s8(b: int) -> int:
+    return b - 256 if b > 127 else b
+
+
 def key_report(mods: int = 0, *keys: int) -> bytes:
     """8-byte keyboard report for CMD_HID: ``[id=2, modifiers, key1..key6]`` (no reserved byte)."""
     return bytes([KEYBOARD_REPORT_ID, mods, *keys[:6]]).ljust(8, b"\0")

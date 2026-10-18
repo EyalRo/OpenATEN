@@ -15,6 +15,9 @@ All notable changes to this project are documented here. The format follows [Kee
 - systemd user unit (`contrib/systemd/openaten.service`) and docs.
 - Property-based tests (hypothesis) for the link frame format and the hand-off state machine.
 
+- Mouse-report coalescing for backlogs (`protocol.coalesce_mouse`, stat `hid_coalesced`).
+- Docs: architecture, troubleshooting, ADRs; coverage floor in CI.
+
 ### Changed
 - Nix package runs the test suite and takes its version from `pyproject.toml`.
 - `cli.py` split: hardware self-tests in `selftest.py`, bridge-end bookkeeping in `ends.py`.

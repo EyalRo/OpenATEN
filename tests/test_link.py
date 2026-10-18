@@ -159,3 +159,17 @@ def test_slave_input_stream_is_polled_quickly_while_active():
     first_arrival = p.bridge.a.hid_times[0]
     later = [(arr - snt) for arr, snt in zip(p.bridge.a.hid_times, sent) if snt > first_arrival]
     assert len(later) >= 10 and max(later) < 0.15, max(later, default=None)
+
+
+def test_a_backlog_of_mouse_reports_is_coalesced_without_losing_motion():
+    from openaten import protocol as pr
+
+    with Pair() as p:
+        n = 30
+        for _ in range(n):
+            p.master.inject_hid(pr.mouse_report(0, 1, 0))
+        t0 = time.time()
+        while sum(r[3] for r in p.bridge.b.hid_in) < n and time.time() - t0 < 5:
+            time.sleep(0.01)
+    assert sum(r[3] for r in p.bridge.b.hid_in) == n  # every count of motion arrived
+    assert p.master.stats["hid_sent"] + p.master.stats["hid_coalesced"] == n
