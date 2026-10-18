@@ -119,7 +119,7 @@ class TransferManager:
             if not p.is_file():
                 raise ValueError(f"not a regular file: {p}")
             size = p.stat().st_size
-            fh = open(p, "rb")
+            fh = open(p, "rb", buffering=0)  # we read whole chunks anyway; buffering would hide a file that changes while it is sent
         except OSError as e:
             raise ValueError(f"cannot read {p}: {e.strerror or e}") from e
         t = _Out(secrets.token_hex(8), p, safe_name(p.name) or "file", size, fh, last=self.now())

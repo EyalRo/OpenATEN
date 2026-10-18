@@ -40,10 +40,12 @@ openaten loopback -n 5
 Connect **both** upstream USB-C ports of the switch to the computer (two ports of the same machine is fine for development).
 The bridge device only appears when both upstream ports are connected.
 
-## Plan
+## Where things live
 
-See [docs/design.md](docs/design.md). The link layer (master-driven polling over the firmware's strict turn-taking) is done and
-hardware-tested; input forwarding, clipboard and file transfer are next. Work items are tracked in the GitHub issues, and findings live in the wiki.
+- **Roadmap and design**: [docs/design.md](docs/design.md). Done: the link layer, input forwarding and edge hand-off. Built but not yet run on hardware:
+  clipboard sharing and file transfer ([docs/applications.md](docs/applications.md)). Open: Windows client, hardware verification.
+- **Tasks**: [GitHub issues](https://github.com/EyalRo/OpenATEN/issues). **Findings and how-tos**: the [wiki](https://github.com/EyalRo/OpenATEN/wiki).
+- **Reference docs** that ship with the code: [docs/](docs/) (protocol, hardware, setup, architecture, troubleshooting, decision records in `docs/adr/`).
 
 ## Contributing
 

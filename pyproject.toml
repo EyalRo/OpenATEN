@@ -58,4 +58,4 @@ source = ["openaten"]
 branch = true
 
 [tool.coverage.report]
-fail_under = 70  # hardware-bound modules (usb, selftest, strip) are mostly untestable in CI; raise as coverage grows
+fail_under = 75  # hardware-bound modules (usb, selftest, strip) are mostly untestable in CI; raise as coverage grows

@@ -54,4 +54,5 @@ progress and cancel, using large frames to reach tens of MB/s.
    self-resync, tests against a fake transport that models the turn rules, `openaten link` hardware self-test; survives SIGKILL of either side mid-transfer.
 4. [done] Input forwarding (Linux sender first) and edge hand-off.
 5. [built, hardware verification pending] Clipboard (Wayland and X11) and files: see [applications.md](applications.md).
-6. Second client for the other computer (Linux first; Windows needs SCSI pass-through instead of libusb).
+6. [done for Linux] The other computer runs the same `openaten daemon --role ...`; a Windows client needs SCSI pass-through instead of libusb (issue #9).
+7. Open: verify everything above on two real computers (issues #27, #20), event-driven waits instead of polling sleeps (#24).

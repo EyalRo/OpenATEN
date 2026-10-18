@@ -21,3 +21,10 @@ def test_setup_is_idempotent():
     n = len(root.handlers)
     logsetup.setup("WARNING")
     assert len(root.handlers) == n
+
+
+def test_records_go_to_the_current_stderr(capsys):
+    logsetup.setup("INFO")
+    logging.getLogger("openaten.test").warning("hello %s", "world")
+    err = capsys.readouterr().err
+    assert "WARNING openaten.test: hello world" in err
