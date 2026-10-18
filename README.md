@@ -44,6 +44,11 @@ The bridge device only appears when both upstream ports are connected.
 See [docs/design.md](docs/design.md). The link layer (master-driven polling over the firmware's strict turn-taking) is done and
 hardware-tested; input forwarding, clipboard and file transfer are next. Work items are tracked in the GitHub issues, and findings live in the wiki.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks and the module layout, [CHANGELOG.md](CHANGELOG.md) for what changed, and
+[SECURITY.md](SECURITY.md) to report a vulnerability.
+
 ## Disclaimer
 
 OpenATEN is an independent project, created through observation of the hardware and interoperability research. It is
