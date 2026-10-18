@@ -4,7 +4,7 @@ from collections import deque
 
 import pytest
 
-from openaten import appmsg
+from openaten import appmsg, transfer
 from openaten.transfer import TransferManager, safe_name
 
 
@@ -251,3 +251,184 @@ def test_hostile_transfer_ids_are_ignored_not_trusted(tmp_path, bad_id):
     p.b.on_message({"kind": "cancel", "id": bad_id}, b"")
     p.a.on_message({"kind": "ack", "id": bad_id, "n": 0}, b"")
     assert p.b.status() == [] and not (tmp_path / "in").exists() and not (tmp_path / "evil").exists()
+
+
+# -- directories ---------------------------------------------------------------------------
+
+
+def make_tree(root):
+    (root / "sub" / "deeper").mkdir(parents=True)
+    (root / "a.txt").write_bytes(b"alpha")
+    (root / ".hidden").write_bytes(b"dot")
+    (root / "empty").write_bytes(b"")
+    (root / "ünï.bin").write_bytes(os.urandom(1500))
+    (root / "sub" / "b.txt").write_bytes(b"beta")
+    (root / "sub" / "deeper" / "c.txt").write_bytes(b"gamma")
+    (root / "emptydir").mkdir()
+    return root
+
+
+def tree_of(root):
+    return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def test_directory_arrives_with_its_structure(tmp_path):
+    src = make_tree(tmp_path / "photos")
+    p = Pair(tmp_path, chunk=500, window=2)
+    bid = p.a.send_directory(src)
+    p.run()
+    got = tmp_path / "in" / "photos"
+    assert tree_of(got) == tree_of(src)  # including the dotfile, the empty file and the unicode name
+    assert not (got / "emptydir").exists()  # empty directories are not sent
+    assert not list((tmp_path / "in").glob(".openaten-*"))
+    batch = [s for s in p.a.status() if s["id"] == bid][0]
+    assert batch["state"] == "done" and batch["files"] == 6 and batch["files_done"] == 6 and batch["name"] == "photos/"
+    assert batch["size"] == sum(len(v) for v in tree_of(src).values())
+    assert {s["name"] for s in p.b.status()} >= {"photos/sub/deeper/c.txt", "photos/.hidden"}
+
+
+def test_send_path_picks_file_or_directory(tmp_path):
+    p = Pair(tmp_path)
+    src = make_tree(tmp_path / "d")
+    p.a.send_path(src / "a.txt")
+    p.a.send_path(src)
+    p.run()
+    assert (tmp_path / "in" / "a.txt").read_bytes() == b"alpha"
+    assert (tmp_path / "in" / "d" / "sub" / "b.txt").read_bytes() == b"beta"
+
+
+def test_existing_directory_is_never_merged_into(tmp_path):
+    (tmp_path / "in" / "photos").mkdir(parents=True)
+    (tmp_path / "in" / "photos" / "keep.txt").write_text("mine")
+    p = Pair(tmp_path)
+    src = make_tree(tmp_path / "photos")
+    p.a.send_directory(src)
+    p.run()
+    assert (tmp_path / "in" / "photos" / "keep.txt").read_text() == "mine"
+    assert sorted(os.listdir(tmp_path / "in" / "photos")) == ["keep.txt"]
+    assert tree_of(tmp_path / "in" / "photos (1)") == tree_of(src)
+
+
+def test_only_a_few_files_of_a_directory_are_in_flight(tmp_path):
+    src = tmp_path / "many"
+    src.mkdir()
+    for i in range(12):
+        (src / f"f{i}").write_bytes(b"x" * 300)
+    p = Pair(tmp_path, chunk=100, window=1)
+    p.a.send_directory(src)
+    most = 0
+    for _ in range(2000):
+        most = max(most, len(p.a._out))
+        if not p.step() and not p.a_to_b and not p.b_to_a:
+            break
+    assert 1 <= most <= transfer.BATCH_CONCURRENCY
+    assert len(tree_of(tmp_path / "in" / "many")) == 12
+
+
+def test_symlinks_and_special_files_are_not_followed(tmp_path):
+    src = tmp_path / "d"
+    src.mkdir()
+    (src / "real.txt").write_text("real")
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret")
+    (src / "link.txt").symlink_to(outside)
+    (src / "linkdir").symlink_to(tmp_path / "in", target_is_directory=True)
+    os.mkfifo(src / "pipe")
+    p = Pair(tmp_path)
+    p.a.send_directory(src)
+    p.run()
+    assert list(tree_of(tmp_path / "in" / "d")) == ["real.txt"]
+
+
+def test_unusable_directories_are_refused_up_front(tmp_path, monkeypatch):
+    p = Pair(tmp_path)
+    (tmp_path / "empty").mkdir()
+    with pytest.raises(ValueError, match="no regular files"):
+        p.a.send_directory(tmp_path / "empty")
+    with pytest.raises(ValueError):
+        p.a.send_directory(tmp_path / "missing")
+    big = tmp_path / "big"
+    big.mkdir()
+    for i in range(4):
+        (big / str(i)).write_bytes(b"x")
+    monkeypatch.setattr(transfer, "MAX_BATCH_FILES", 3)
+    with pytest.raises(ValueError, match="more than 3 files"):
+        p.a.send_directory(big)
+    monkeypatch.undo()
+    p.up = False
+    with pytest.raises(ValueError, match="link"):
+        p.a.send_directory(make_tree(tmp_path / "d"))
+    assert p.a.status() == []
+
+
+def test_receiver_that_refuses_stops_the_whole_directory(tmp_path):
+    p = Pair(tmp_path, receive=False)
+    src = make_tree(tmp_path / "d")
+    bid = p.a.send_directory(src)
+    p.run()
+    batch = [s for s in p.a.status() if s["id"] == bid][0]
+    assert batch["state"] == "failed" and "not enabled" in batch["error"]
+    assert p.log.count("offer") <= transfer.BATCH_CONCURRENCY  # the rest was never offered
+
+
+def test_cancel_stops_a_directory_in_flight(tmp_path):
+    src = tmp_path / "d"
+    src.mkdir()
+    for i in range(6):
+        (src / f"f{i}").write_bytes(b"x" * 2000)
+    p = Pair(tmp_path, chunk=100, window=1)
+    bid = p.a.send_directory(src)
+    p.step()
+    p.step()
+    assert p.a.cancel(bid)
+    p.run()
+    batch = [s for s in p.a.status() if s["id"] == bid][0]
+    assert batch["state"] == "cancelled"
+    assert not p.a._out and not list((tmp_path / "in").glob(".openaten-*"))
+    assert len(tree_of(tmp_path / "in" / "d")) < 6
+
+
+def test_link_loss_fails_a_directory(tmp_path):
+    p = Pair(tmp_path, chunk=100, window=1)
+    src = make_tree(tmp_path / "d")
+    bid = p.a.send_directory(src)
+    p.step()
+    p.step()
+    p.a.link_lost()
+    batch = [s for s in p.a.status() if s["id"] == bid][0]
+    assert batch["state"] == "failed" and "link went down" in batch["error"]
+    assert not p.a._batches and not p.a._out
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"batch": "b1", "top": "d", "rel": ["..", "x"]},
+        {"batch": "b1", "top": "d", "rel": ["a/b"]},
+        {"batch": "b1", "top": "d", "rel": ["a\\b"]},
+        {"batch": "b1", "top": "..", "rel": ["x"]},
+        {"batch": "b1", "top": "d/e", "rel": ["x"]},
+        {"batch": "b1", "top": "d", "rel": []},
+        {"batch": "b1", "top": "d", "rel": "x"},
+        {"batch": "b1", "top": "d", "rel": ["x"] * 33},
+        {"batch": "../b", "top": "d", "rel": ["x"]},
+        {"batch": 5, "top": "d", "rel": ["x"]},
+        {"batch": "b1", "top": 5, "rel": ["x"]},
+    ],
+)
+def test_hostile_directory_offers_are_rejected_and_write_nothing(tmp_path, extra):
+    p = Pair(tmp_path)
+    p.b.on_message({"kind": "offer", "id": "t1", "name": "x", "size": 1, **extra}, b"")
+    assert [appmsg.unpack(m)[0]["kind"] for m in p.b_to_a] == ["reject"]
+    assert p.b.status() == []
+    assert not [f for f in tmp_path.rglob("*") if f.name not in ("in",) and tmp_path / "in" in f.parents]
+    assert not (tmp_path.parent / "x").exists()
+
+
+def test_a_directory_offer_cannot_escape_through_a_later_file(tmp_path):
+    p = Pair(tmp_path)
+    for i, rel in enumerate((["ok", "one.txt"], ["ok", "two.txt"])):
+        p.b.on_message({"kind": "offer", "id": f"t{i}", "name": "x", "size": 1, "batch": "b1", "top": "T", "rel": rel}, b"")
+        p.b.on_message({"kind": "chunk", "id": f"t{i}", "n": 0}, b"z")
+        p.b.on_message({"kind": "done", "id": f"t{i}", "size": 1, "sha256": hashlib.sha256(b"z").hexdigest()}, b"")
+    assert sorted(tree_of(tmp_path / "in" / "T")) == ["ok/one.txt", "ok/two.txt"]  # both files share one top directory

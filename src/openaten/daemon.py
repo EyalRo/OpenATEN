@@ -225,7 +225,7 @@ class Daemon:
                 path = req.get("path")
                 if not isinstance(path, str) or not os.path.isabs(path):
                     raise ValueError("send needs an absolute path")
-                reply.put({"ok": True, "id": self.transfers.send_file(path)})
+                reply.put({"ok": True, "id": self.transfers.send_path(path)})
             else:
                 tid = req.get("id")
                 reply.put({"ok": bool(isinstance(tid, str) and self.transfers.cancel(tid)), "error": None})

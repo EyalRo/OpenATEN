@@ -104,7 +104,7 @@ def _make_clipboard(send):
 
 
 def cmd_send(args) -> int:
-    """Ask the running daemon to send files to the other computer (the other daemon must run with --receive-dir)."""
+    """Ask the running daemon to send files or directories to the other computer (the other daemon must run with --receive-dir)."""
     from . import daemon as dm
 
     rc = 0
@@ -210,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
     ly = sub.add_parser("layout", help="show the borders derived from the screen layout")
     ly.add_argument("--screens", help="screen layout TOML (default: ~/.config/openaten/screens.toml)")
     ly.set_defaults(fn=cmd_layout)
-    sd = sub.add_parser("send", help="send files to the other computer through the running daemon")
+    sd = sub.add_parser("send", help="send files or directories to the other computer through the running daemon")
     sd.add_argument("files", nargs="+")
     sd.set_defaults(fn=cmd_send)
     ct = sub.add_parser("ctl", help="control the running daemon")

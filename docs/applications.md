@@ -21,7 +21,7 @@ Channels 2 and 3 share one framing (`appmsg.py`): a 4-byte big-endian header len
 - Message: `clip {mime, sha}` + data; the receiver checks the SHA-256 and the MIME type before writing it to its clipboard.
 - Both computers must run with `--clipboard` to share in both directions; a computer without it ignores incoming clips.
 
-## Files (`openaten send FILE...`, `openaten daemon --receive-dir DIR`)
+## Files and directories (`openaten send PATH...`, `openaten daemon --receive-dir DIR`)
 
 ```
 sender   -> receiver   offer   {id, name, size}
@@ -41,3 +41,13 @@ either                 cancel  {id}
 - `openaten ctl status` (and `status.json`) list `transfers` with `id, name, direction, size, done, state, error`; `openaten send` prints the transfer id.
   A link failure fails every transfer in flight; nothing is resumed.
 - Transfers can be cancelled with the control socket command `cancel {id}`.
+
+### Directories
+
+`openaten send DIR` sends every regular file below `DIR` as its own transfer. Symlinks (also symlinked directories) and special files are skipped, empty directories
+are not sent, and a directory may hold at most 10 000 files (send an archive instead). The offers carry `batch` (one id for the whole directory), `top` (the directory's name)
+and `rel` (the file's path components below it). The receiver recreates the tree under `top` inside `--receive-dir` (`top (1)`, `top (2)` ... if it exists: it never merges into
+or overwrites an existing directory); dotfiles keep their names, `.`/`..`/separators in a component reject the offer, and paths deeper than 32 components are refused.
+The sender keeps two files of a directory in flight at a time and stops the rest if the receiver rejects one (for example when receiving is not enabled). `openaten ctl status`
+shows one summary entry per directory (`files`, `files_done`, `size`, `done`) next to the individual files. A failed or cancelled directory leaves the files that already arrived in place.
+A peer running an older version treats each file as a plain file named after its last component.
