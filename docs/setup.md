@@ -144,7 +144,7 @@ CI (`.github/workflows/ci.yml`) runs the same three on Python 3.10-3.12.
 
 ## Run the daemon as a service
 
-`contrib/systemd/openaten.service` is a hardened systemd *user* unit; the header of the file has the install steps. Override `ExecStart`
+On NixOS use the module below instead. `contrib/systemd/openaten.service` is a systemd *user* unit; the header of the file has the install steps. Override `ExecStart`
 with `systemctl --user edit openaten` to pick the `--role` and `--screens`, and read the logs with `journalctl --user -u openaten`.
 The unit is untested on real hardware.
 
@@ -167,3 +167,27 @@ openaten send photo.jpg report.pdf                                              
 ```
 
 Install `wl-clipboard` (Wayland) or `xclip` (X11) for clipboard sharing. Put the options in `config.toml` (`clipboard = true`, `receive_dir = "..."`) to keep them out of the service unit.
+
+## NixOS module
+
+The flake exports a NixOS module that installs the package, the udev rule and a systemd user service, and adds your user to the `input` group:
+
+```nix
+{
+  inputs.openaten.url = "github:EyalRo/OpenATEN";
+  # in your NixOS configuration:
+  imports = [ openaten.nixosModules.default ];
+  services.openaten = {
+    enable = true;
+    role = "master";                      # "slave" on the other computer
+    users = [ "me" ];                     # added to the input group
+    clipboard = true;                     # optional, see applications.md
+    receiveDir = "%h/Downloads/OpenATEN"; # optional: accept files from the other computer
+    # logLevel = "INFO"; extraArgs = [ "--hotkey" "ctrl+alt+k" ]; usbStorageQuirk = true;
+  };
+}
+```
+
+`usbStorageQuirk` (default on) adds `usb-storage.quirks=05e3:0627:i` to the kernel command line so the kernel never probes the bridge's mass-storage
+function (see [hardware.md](hardware.md)). `nix flake check` builds the package, which runs the test suite, and evaluates this module with a sample configuration.
+The module has been evaluated but not yet run on a real NixOS machine with a switch.

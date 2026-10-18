@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## Unreleased
 
 ### Added
+- NixOS module (`nixosModules.default`, `services.openaten`): package, udev rule, kernel quirk, `input` group and a systemd user service; evaluated by `nix flake check`.
 - Release workflow publishes to PyPI via trusted publishing once `PUBLISH_TO_PYPI` is set (skipped until then); release steps in CONTRIBUTING.
 - Clipboard sharing (`daemon --clipboard`; text and PNG, wl-clipboard/xclip) and file transfer (`openaten send`, `daemon --receive-dir`) over the link, opt-in; see docs/applications.md. `status.json` gains `clipboard` and `transfers`. Not yet verified on hardware.
 - Daemon reconnects immediately when the bridge re-enumerates (kernel uevent netlink listener, `openaten.hotplug`); falls back to polling where unavailable.
@@ -22,6 +23,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Mouse-report coalescing for backlogs (`protocol.coalesce_mouse`, stat `hid_coalesced`).
 - Docs: architecture, troubleshooting, ADRs; coverage floor in CI.
+
+### Fixed
+- Nix package tests now run (they failed for lack of `hypothesis`, and `nix flake check` did not build the package); the sender reads files unbuffered so a file that changes while being sent is detected.
 
 ### Changed
 - `BridgeEnd` commands raise typed `TransportError`s (`openaten.errors`) instead of pyusb's `USBError`.

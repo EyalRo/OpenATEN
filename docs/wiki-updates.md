@@ -45,7 +45,7 @@ ruff check . && mypy && pytest
 ## Workflows (`.github/workflows/`)
 | Workflow | Does |
 |---|---|
-| `ci.yml` | `test` (ruff, mypy, pytest + coverage on Python 3.10/3.11/3.12), `package` (sdist+wheel, `twine check`), `nix` (`nix flake check`, which also runs the tests in the Nix build) |
+| `ci.yml` | `test` (ruff, mypy, pytest + coverage on Python 3.10/3.11/3.12), `package` (sdist+wheel, `twine check`), `nix` (`nix flake check`: builds the package, which runs the test suite inside the Nix build, and evaluates the NixOS module `nixosModules.default` with a sample config) |
 | `codeql.yml` | CodeQL for Python on push, pull requests and weekly |
 | `release.yml` | On a `v*` tag: tag must equal the package version, checks run, build, GitHub release with artifacts |
 
@@ -56,6 +56,7 @@ ruff check . && mypy && pytest
 ## Gotchas learned
 - **Dependency review** (`actions/dependency-review-action`) fails with "not supported on this repository" until the *Dependency graph* is enabled in repo settings. It was removed from the first PR for that reason; re-add it after enabling the setting.
 - The release workflow has `contents: write`: keep its Actions SHA-pinned.
+- `nix flake check` only **evaluates** packages. To make CI build the package (and so run its tests inside the Nix build) the flake lists it under `checks.package`; before that, a missing test dependency (`hypothesis`) went unnoticed. The Nix build uses nixpkgs' newest Python (3.14 at the time), which also exposed a test that depended on Python's default file buffering.
 - Systemd hardening such as `ProtectSystem=strict` breaks the daemon, because `$XDG_RUNTIME_DIR` (status file and control socket) becomes read-only. The shipped unit only sets `NoNewPrivileges`.
 
 ## Repo settings to apply by hand
