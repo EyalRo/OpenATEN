@@ -11,7 +11,12 @@ All notable changes to this project are documented here. The format follows [Kee
 - Control socket: request timeout and peer-uid check.
 - Link restart in the daemon backs off from 2 s to 30 s.
 
+- CodeQL and dependency-review workflows; GitHub Actions pinned by commit SHA.
+- systemd user unit (`contrib/systemd/openaten.service`) and docs.
+- Property-based tests (hypothesis) for the link frame format and the hand-off state machine.
+
 ### Changed
+- Nix package runs the test suite and takes its version from `pyproject.toml`.
 - `cli.py` split: hardware self-tests in `selftest.py`, bridge-end bookkeeping in `ends.py`.
 - Version is read from package metadata.
 

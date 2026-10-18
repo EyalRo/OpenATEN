@@ -18,7 +18,7 @@ classifiers = [
 dependencies = ["pyusb>=1.2", "tomli>=2; python_version < \"3.11\""]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-cov", "ruff", "mypy"]
+dev = ["pytest", "pytest-cov", "hypothesis", "ruff", "mypy"]
 forward = ["evdev"]
 
 [project.urls]

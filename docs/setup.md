@@ -141,3 +141,9 @@ ruff check . && mypy && pytest
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same three on Python 3.10-3.12.
+
+## Run the daemon as a service
+
+`contrib/systemd/openaten.service` is a hardened systemd *user* unit; the header of the file has the install steps. Override `ExecStart`
+with `systemctl --user edit openaten` to pick the `--role` and `--screens`, and read the logs with `journalctl --user -u openaten`.
+The unit is untested on real hardware.
