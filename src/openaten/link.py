@@ -277,7 +277,7 @@ class LinkSession:
             return
         self._sent(frame)
         if self._recv_frame() is None:
-            time.sleep(0.05)
+            self._stop.wait(0.05)  # prompt shutdown instead of a blind sleep
         elif self.idle() and time.monotonic() >= self._hid_active_until:
             self._stop.wait(self.poll_idle)
 
