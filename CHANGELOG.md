@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format follows [Kee
 ## Unreleased
 
 ### Added
+- Clipboard sharing (`daemon --clipboard`; text and PNG, wl-clipboard/xclip) and file transfer (`openaten send`, `daemon --receive-dir`) over the link, opt-in; see docs/applications.md. `status.json` gains `clipboard` and `transfers`. Not yet verified on hardware.
+- Daemon reconnects immediately when the bridge re-enumerates (kernel uevent netlink listener, `openaten.hotplug`); falls back to polling where unavailable.
+- `hardware` pytest marker (`pytest -m hardware`) running the list/state/loopback/link/hid self-tests against a real switch.
+- Optional `config.toml` for command defaults (`--config`, `contrib/config.example.toml`).
 - CI (ruff, mypy, pytest on Python 3.10-3.12), pre-commit, Dependabot, issue/PR templates, SECURITY and CONTRIBUTING.
 - Structured logging: `--log-level` / `OPENATEN_LOG`, standard levels on stderr.
 - Hand-off messages carry a protocol version (`v`); newer versions and unknown kinds are ignored.
@@ -19,6 +23,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Docs: architecture, troubleshooting, ADRs; coverage floor in CI.
 
 ### Changed
+- `BridgeEnd` commands raise typed `TransportError`s (`openaten.errors`) instead of pyusb's `USBError`.
 - Nix package runs the test suite and takes its version from `pyproject.toml`.
 - `cli.py` split: hardware self-tests in `selftest.py`, bridge-end bookkeeping in `ends.py`.
 - Version is read from package metadata.

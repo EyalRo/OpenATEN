@@ -34,6 +34,8 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not hardware'"  # real-switch tests only run on request: pytest -m hardware
+markers = ["hardware: needs an ATEN switch with both upstream ports connected to this machine (see docs/hardware.md)"]
 pythonpath = ["src", "tests"]
 
 [tool.ruff]
@@ -56,4 +58,4 @@ source = ["openaten"]
 branch = true
 
 [tool.coverage.report]
-fail_under = 60  # hardware-bound modules (usb, selftest, strip) are mostly untestable in CI; raise as coverage grows
+fail_under = 70  # hardware-bound modules (usb, selftest, strip) are mostly untestable in CI; raise as coverage grows

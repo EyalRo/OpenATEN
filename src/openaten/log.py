@@ -9,9 +9,9 @@ LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 ENV_VAR = "OPENATEN_LOG"
 
 
-def setup(level: str | None = None) -> None:
-    """Configure the ``openaten`` logger. ``level`` wins over ``$OPENATEN_LOG``; the default is INFO."""
-    name = (level or os.environ.get(ENV_VAR) or "INFO").upper()
+def setup(level: str | None = None, fallback: str | None = None) -> None:
+    """Configure the ``openaten`` logger. Precedence: ``level`` (flag), ``$OPENATEN_LOG``, ``fallback`` (config file), INFO."""
+    name = (level or os.environ.get(ENV_VAR) or fallback or "INFO").upper()
     if name not in LEVELS:
         name = "INFO"
     root = logging.getLogger("openaten")
