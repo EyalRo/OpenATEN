@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## Unreleased
 
 ### Added
+- Release workflow publishes to PyPI via trusted publishing once `PUBLISH_TO_PYPI` is set (skipped until then); release steps in CONTRIBUTING.
 - Clipboard sharing (`daemon --clipboard`; text and PNG, wl-clipboard/xclip) and file transfer (`openaten send`, `daemon --receive-dir`) over the link, opt-in; see docs/applications.md. `status.json` gains `clipboard` and `transfers`. Not yet verified on hardware.
 - Daemon reconnects immediately when the bridge re-enumerates (kernel uevent netlink listener, `openaten.hotplug`); falls back to polling where unavailable.
 - `hardware` pytest marker (`pytest -m hardware`) running the list/state/loopback/link/hid self-tests against a real switch.

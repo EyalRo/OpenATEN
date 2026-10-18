@@ -40,3 +40,11 @@ in [docs/design.md](docs/design.md); individual tasks are GitHub issues.
 - Add a CHANGELOG entry under "Unreleased" for user-visible changes.
 - Read [docs/hardware.md](docs/hardware.md) before running anything on a real switch: some command patterns wedge the firmware until power-cycle.
 - Never commit vendor software or firmware.
+
+## Releasing
+
+1. Bump `version` in `pyproject.toml` (the package and the Nix flake read it from there) and move the CHANGELOG's "Unreleased" entries under the new version.
+2. Merge, then tag `vX.Y.Z` on `main` and push the tag. The `Release` workflow checks that the tag equals the package version, runs the checks,
+   builds, and creates the GitHub release with the sdist and wheel attached.
+3. PyPI (one-time set-up, then automatic): on pypi.org add a *trusted publisher* for this repository (workflow `release.yml`, environment `pypi`),
+   create the `pypi` environment in the repository settings, and set the repository variable `PUBLISH_TO_PYPI` to `true`. Until then the `publish` job is skipped.
