@@ -12,7 +12,7 @@ license = { text = "MIT" }
 dependencies = ["pyusb>=1.2", "tomli>=2; python_version < \"3.11\""]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "ruff", "mypy"]
 forward = ["evdev"]
 
 [project.scripts]
@@ -24,3 +24,18 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]
+
+[tool.ruff]
+line-length = 160
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# E501: long lines are the house style (formatter not enforced); B905/B023/E731: zip lengths are equal by construction, closures are intentional
+ignore = ["E501", "B905", "B023", "E731"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+ignore_missing_imports = true

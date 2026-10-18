@@ -126,3 +126,18 @@ controls it over `ctl.sock`. The bridge end is only claimed while forwarding is 
 
 A Noctalia v5 bar widget lives in [`noctalia/`](../noctalia/README.md): it shows bridge/forwarding state and toggles on click
 (add `stags/openaten:widget` to a bar). The widget runs `openaten ctl toggle`, so `openaten` must be on the shell's PATH.
+
+## Logging
+
+Commands log to stderr with standard levels (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`), so the daemon's output lands in the journal when run
+under systemd. Choose the verbosity with `openaten --log-level DEBUG <command>` or `OPENATEN_LOG=DEBUG`; the default is `INFO`. Hardware
+self-tests and `list`/`state`/`ctl` still print their results to stdout.
+
+## Development checks
+
+```sh
+pip install -e ".[dev]"
+ruff check . && mypy && pytest
+```
+
+CI (`.github/workflows/ci.yml`) runs the same three on Python 3.10-3.12.

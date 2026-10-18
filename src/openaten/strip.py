@@ -9,17 +9,19 @@ Needs GTK 4, gtk4-layer-shell and PyGObject. Not exercised by the test suite (it
 """
 from __future__ import annotations
 
-import sys
+import logging
 
 from . import daemon
 from .edges import EdgeSwitch
+
+log = logging.getLogger(__name__)
 
 
 def _report(key: str, row: float, enter: bool) -> None:
     try:
         daemon.request("edge", border=key, row=row, enter=enter)
     except OSError as e:
-        print(f"daemon not reachable: {e}", file=sys.stderr, flush=True)
+        log.warning("daemon not reachable: %s", e)
 
 
 def run(sw: EdgeSwitch) -> int:
@@ -29,13 +31,14 @@ def run(sw: EdgeSwitch) -> int:
         gi.require_version("Gtk", "4.0")
         gi.require_version("Gdk", "4.0")
         gi.require_version("Gtk4LayerShell", "1.0")
-        from gi.repository import Gdk, Gtk, Gtk4LayerShell as LayerShell
+        from gi.repository import Gdk, Gtk
+        from gi.repository import Gtk4LayerShell as LayerShell
     except (ImportError, ValueError) as e:
-        print(f"GTK4, gtk4-layer-shell and PyGObject are required: {e}", file=sys.stderr)
+        log.error("GTK4, gtk4-layer-shell and PyGObject are required: %s", e)
         return 1
 
     if Gdk.Display.get_default() is None:
-        print("no Wayland display: run this inside the compositor session", file=sys.stderr)
+        log.error("no Wayland display: run this inside the compositor session")
         return 1
     local = {s.name: s for s in sw.local.screens}  # keyed by output connector name
     app = Gtk.Application(application_id="com.openaten.Strip")
@@ -49,7 +52,7 @@ def run(sw: EdgeSwitch) -> int:
         for key, (edge, back) in zip(sw.keys, sw.pairs):
             screen, monitor = local[back.far], monitors.get(back.far)  # back.far is this computer's screen at the border
             if monitor is None:
-                print(f"no output named {screen.name} for border {key}; skipping", file=sys.stderr, flush=True)
+                log.warning("no output named %s for border %s; skipping", screen.name, key)
                 continue
             win = Gtk.Window(application=app)
             win.add_css_class("openaten-strip")

@@ -2,20 +2,23 @@
 from __future__ import annotations
 
 import argparse
-from .forward import DEFAULT_HOTKEY
+import logging
 import os
 import sys
 import threading
-from pathlib import Path
 import time
+from pathlib import Path
 
 import usb.core
 import usb.util
 
+from . import log as logsetup
 from . import protocol as pr
+from .forward import DEFAULT_HOTKEY
 from .link import LinkSession, UsbTransport
 from .usb import BridgeEnd, find_ends, port_path
 
+log = logging.getLogger(__name__)
 
 _OPENED: list[BridgeEnd] = []
 _STUCK_THREADS: list[bool] = []  # set if a link thread is still blocked inside libusb
@@ -196,8 +199,8 @@ def _load_edges(args):
     try:
         sw = edges.load(path)
     except (ValueError, OSError) as e:
-        raise SystemExit(f"{path}: {e}")
-    print(f"edge hand-off on ({len(sw.pairs)} border(s) from {path}); push the pointer into a screen edge once to calibrate")
+        raise SystemExit(f"{path}: {e}") from e
+    log.info("edge hand-off on (%d border(s) from %s); push the pointer into a screen edge once to calibrate", len(sw.pairs), path)
     return sw
 
 
@@ -225,15 +228,15 @@ def cmd_forward(args) -> int:
     if args.port:
         candidates = [d for d in candidates if port_path(d) == args.port]
     if not candidates:
-        print("no bridge end found (see `openaten list`)")
+        log.error("no bridge end found (see `openaten list`)")
         return 1
     end = BridgeEnd(candidates[0])  # claim only the end we inject through; the other one stays free for other tools
     _OPENED.append(end)
-    print(f"injecting through the end on port {port_path(end.dev)}")
+    log.info("injecting through the end on port %s", port_path(end.dev))
     try:
         return run_evdev(end.hid, args.hotkey, dry_run=args.dry_run, max_active=args.max_active or None, edges=_load_edges(args))
     except ImportError:
-        print("python-evdev is required: pip install evdev")
+        log.error("python-evdev is required: pip install evdev")
         return 1
 
 
@@ -244,13 +247,12 @@ def cmd_daemon(args) -> int:
 
     sw = _load_edges(args)
     d = dm.Daemon(
-        lambda send: EvdevRunner(send, args.hotkey, max_active=args.max_active or None, log=lambda m: print(m, flush=True), edges=sw),
+        lambda send: EvdevRunner(send, args.hotkey, max_active=args.max_active or None, edges=sw),
         find_ends,
         BridgeEnd,
         port=args.port,
         port_of=port_path,
         hotkey=args.hotkey,
-        log=lambda m: print(m, flush=True),
         role=args.role,
         make_link=lambda end, master, on_message, on_error: LinkSession(UsbTransport(end), master, on_message, poll_idle=0.02, on_error=on_error),
     )
@@ -336,6 +338,7 @@ def cmd_hid(_args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="openaten", description=__doc__)
+    ap.add_argument("--log-level", choices=logsetup.LEVELS, type=str.upper, help=f"log verbosity (default: ${logsetup.ENV_VAR} or INFO)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list", help="list bridge ends").set_defaults(fn=cmd_list)
     sub.add_parser("state", help="read role and link state of each end").set_defaults(fn=cmd_state)
@@ -372,6 +375,7 @@ def main(argv: list[str] | None = None) -> int:
     ct.set_defaults(fn=cmd_ctl)
     sub.add_parser("hid", help="HID injection round-trip test between two ends on this host").set_defaults(fn=cmd_hid)
     args = ap.parse_args(argv)
+    logsetup.setup(args.log_level)
     try:
         rc = args.fn(args)
     finally:

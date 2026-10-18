@@ -7,13 +7,17 @@ devices are grabbed (so nothing reaches this desktop) and every event becomes a 
 """
 from __future__ import annotations
 
+import logging
 import select
 import signal
 import time
-from typing import Callable, Iterable, Optional
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from . import hid as H
 from .edges import EdgeSwitch
+
+log = logging.getLogger(__name__)
 
 KEY_NAMES = {
     "ctrl": 29, "leftctrl": 29, "rightctrl": 97, "shift": 42, "leftshift": 42, "rightshift": 54,
@@ -53,9 +57,9 @@ class Forwarder:
         self,
         send_report: Callable[[bytes], None],
         hotkey: str = DEFAULT_HOTKEY,
-        on_state: Optional[Callable[[bool], None]] = None,
-        keys_down: Optional[Callable[[], bool]] = None,
-        edges: Optional[EdgeSwitch] = None,
+        on_state: Callable[[bool], None] | None = None,
+        keys_down: Callable[[], bool] | None = None,
+        edges: EdgeSwitch | None = None,
     ):
         self.send_report = send_report
         self.edges = edges
@@ -181,21 +185,20 @@ class EvdevRunner:
         dry_run: bool = False,
         max_active: float | None = None,
         exclude_vendors: set[int] | None = None,
-        log: Callable[[str], None] = print,
         edges: EdgeSwitch | None = None,
     ):
         self.edges = edges
-        self.log, self.dry_run, self.max_active, self.hotkey = log, dry_run, max_active, hotkey
+        self.dry_run, self.max_active, self.hotkey = dry_run, max_active, hotkey
         self._exclude = {0x05E3, 0x0557} | (exclude_vendors or set())
         self._send_report = send_report
         self.devices: list = []
         self.kinds: dict[int, str] = {}
-        self._by_fd: dict[int, object] = {}
+        self._by_fd: dict[int, Any] = {}
         self._grabbed: list = []
         self._active_since = 0.0
         self._abort = False
         self.error: str | None = None
-        send = (lambda r: log(f"report {r.hex(' ')}")) if dry_run else self._send
+        send = (lambda r: log.info("report %s", r.hex(" "))) if dry_run else self._send
         self.fwd = Forwarder(send, hotkey, self._on_state, keys_down=lambda: any(_held_now(d) for d in self.devices), edges=edges)
 
     # -- devices ----------------------------------------------------------------------
@@ -214,9 +217,9 @@ class EvdevRunner:
                 self.devices.append(dev)
                 self.kinds[dev.fd] = kind
                 self._by_fd[dev.fd] = dev
-                self.log(f"watching {dev.name} ({dev.path}) as {kind}")
+                log.info("watching %s (%s) as %s", dev.name, dev.path, kind)
         if not self.devices:
-            self.log("no readable keyboard/mouse devices found (are you in the 'input' group?)")
+            log.warning("no readable keyboard/mouse devices found (are you in the 'input' group?)")
         return bool(self.devices)
 
     # -- control ----------------------------------------------------------------------
@@ -249,7 +252,7 @@ class EvdevRunner:
             self._send_report(report)
         except Exception as e:  # bridge unplugged, firmware refusing...: give control back instead of dying
             self.error = f"injection failed: {e}"
-            self.log(self.error)
+            log.error("%s", self.error)
             self._abort = True
 
     def _on_state(self, grabbed: bool) -> None:
@@ -260,19 +263,19 @@ class EvdevRunner:
                         d.grab()
                         self._grabbed.append(d)
                     except OSError as e:
-                        self.log(f"could not grab {d.name}: {e}")
+                        log.warning("could not grab %s: %s", d.name, e)
                         self.error = f"could not grab {d.name}: {e} (is another openaten instance running?)"
                         self._abort = True  # step() returns control: never forward while the desktop still sees the input
                         return
             self._active_since = time.monotonic()
-            self.log("devices grabbed: forwarding ON  (press the hotkey again to return control)")
+            log.info("devices grabbed: forwarding ON  (press the hotkey again to return control)")
         else:
             while self._grabbed:
                 try:
                     self._grabbed.pop().ungrab()
                 except OSError:
                     pass
-            self.log("devices released: forwarding OFF")
+            log.info("devices released: forwarding OFF")
 
     # -- loop -------------------------------------------------------------------------
     def step(self, timeout: float = 0.25) -> None:
@@ -295,7 +298,7 @@ class EvdevRunner:
             self.fwd.request(False)
             self._abort = False
         if self.fwd.forwarding and self.max_active and time.monotonic() - self._active_since > self.max_active:
-            self.log(f"safety timeout ({self.max_active:.0f}s): returning control")
+            log.warning("safety timeout (%.0fs): returning control", self.max_active)
             self.fwd.request(False)
 
     def close(self) -> None:
@@ -319,22 +322,21 @@ def run_evdev(
     dry_run: bool = False,
     max_active: float | None = None,
     exclude_vendors: set[int] | None = None,
-    log: Callable[[str], None] = print,
     edges: EdgeSwitch | None = None,
 ) -> int:
     """Interactive forwarding: runs until interrupted (SIGINT/SIGTERM)."""
-    runner = EvdevRunner(send_report, hotkey, dry_run, max_active, exclude_vendors, log, edges)
+    runner = EvdevRunner(send_report, hotkey, dry_run, max_active, exclude_vendors, edges)
     if not runner.open():
         return 1
     stop = {"flag": False}
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.__setitem__("flag", True))
-    log(f"hotkey: {hotkey}" + ("  [dry run: devices are not grabbed, nothing is injected]" if dry_run else ""))
+    log.info("hotkey: %s%s", hotkey, "  [dry run: devices are not grabbed, nothing is injected]" if dry_run else "")
     try:
         while not stop["flag"]:
             runner.step()
             if not runner._by_fd:
-                log("all input devices disappeared")
+                log.warning("all input devices disappeared")
                 return 1
     finally:
         runner.close()

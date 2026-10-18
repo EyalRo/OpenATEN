@@ -8,12 +8,12 @@ from openaten.link import TransportError, TransportStall, TransportTimeout
 
 
 class FakeEnd:
-    def __init__(self, bridge: "FakeBridge", name: str):
+    def __init__(self, bridge: FakeBridge, name: str):
         self.bridge, self.name = bridge, name
         self.last: str | None = None  # 'tx' or 'rx': the next command must be the other one
         self.armed: int | None = None
         self.inbox: bytes | None = None
-        self.peer: "FakeEnd"
+        self.peer: FakeEnd
         self.hid_in: list[bytes] = []  # HID reports injected on this end by the peer
         self.hid_times: list[float] = []
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Callable
+from collections.abc import Callable
 
 CH_CONTROL = 1  # link channel carrying these messages
 

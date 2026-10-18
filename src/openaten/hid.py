@@ -6,7 +6,7 @@ the HID report ID of the bridge's descriptor; there is no horizontal scroll.)
 """
 from __future__ import annotations
 
-from typing import Iterable, Iterator
+from collections.abc import Iterable, Iterator
 
 # Linux event types / codes used here (linux/input-event-codes.h)
 EV_SYN, EV_KEY, EV_REL = 0, 1, 2

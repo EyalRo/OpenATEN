@@ -55,7 +55,7 @@ def make(tmp_path, ends=None, **kw):
         runners.append(r)
         return r
 
-    d = dm.Daemon(mk, lambda: list(ends), FakeEnd, port_of=lambda d: d.port, hotkey="ctrl+alt+k", log=lambda m: None, directory=tmp_path, **kw)
+    d = dm.Daemon(mk, lambda: list(ends), FakeEnd, port_of=lambda d: d.port, hotkey="ctrl+alt+k", directory=tmp_path, **kw)
     return d, runners, ends
 
 

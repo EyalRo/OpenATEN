@@ -11,15 +11,19 @@ Commands: ``status``, ``on``, ``off``, ``toggle``, ``quit``, and ``edge`` (``bor
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import socketserver
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any
 
 from . import control
+
+log = logging.getLogger(__name__)
 
 HEARTBEAT = 2.0
 RELEASE_AFTER = 2.0  # give the bridge end back this long after forwarding turned off
@@ -40,7 +44,7 @@ def socket_path() -> Path:
 
 class _Handler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
-        daemon: "Daemon" = self.server.daemon  # type: ignore[attr-defined]
+        daemon: Daemon = self.server.daemon  # type: ignore[attr-defined]
         try:
             req = json.loads(self.rfile.readline(4096) or b"{}")
             cmd = req.get("cmd", "status")
@@ -79,35 +83,34 @@ class Daemon:
         make_runner: Callable[[Callable[[bytes], None]], object],
         find_ends: Callable[[], list],
         open_end: Callable[[object], object],
-        port: Optional[str] = None,
+        port: str | None = None,
         port_of: Callable[[object], str] = lambda d: "",
         hotkey: str = "",
-        log: Callable[[str], None] = print,
-        directory: Optional[Path] = None,
-        role: Optional[str] = None,
-        make_link: Optional[Callable[..., object]] = None,
+        directory: Path | None = None,
+        role: str | None = None,
+        make_link: Callable[..., object] | None = None,
     ):
         self.dir = directory or runtime_dir()
         self.make_runner, self.find_ends, self.open_end = make_runner, find_ends, open_end
-        self.port, self.port_of, self.hotkey, self.log = port, port_of, hotkey, log
-        self.commands: "queue.Queue" = queue.Queue()
+        self.port, self.port_of, self.hotkey = port, port_of, hotkey
+        self.commands: queue.Queue = queue.Queue()
         self.role, self.make_link = role, make_link
-        self.link = None  # persistent link session (role mode): HID reports and hand-off messages ride on it
-        self._link_error: Optional[str] = None
+        self.link: Any = None  # persistent link session (role mode): HID reports and hand-off messages ride on it
+        self._link_error: str | None = None
         self._link_retry_at = 0.0
         self.handoff = control.Handoff(self._push, self._pull, self._send_control)
-        self._pending: Optional[tuple[str, float]] = None  # border/row of a push waiting for forwarding to start
+        self._pending: tuple[str, float] | None = None  # border/row of a push waiting for forwarding to start
         self._was_forwarding = False
-        self.runner = None
-        self._end = None
-        self._end_idle_since: Optional[float] = None
+        self.runner: Any = None
+        self._end: Any = None
+        self._end_idle_since: float | None = None
         self._lock = threading.Lock()
         self._snap: dict = {}
-        self._written: Optional[dict] = None
+        self._written: dict | None = None
         self._written_at = 0.0
-        self.error: Optional[str] = None
+        self.error: str | None = None
         self.stop_flag = threading.Event()
-        self._server: Optional[_Server] = None
+        self._server: _Server | None = None
 
     # -- bridge end ---------------------------------------------------------------------
     def _candidates(self) -> list:
@@ -150,6 +153,7 @@ class Daemon:
 
     def _on_link_error(self, e: Exception) -> None:
         self._link_error = f"link: {e}"
+        log.error("link session ended: %s", e, exc_info=e)
 
     def _ensure_link(self) -> None:
         """Role mode: keep the bridge end claimed and a link session running (restarted after errors)."""
@@ -170,10 +174,13 @@ class Daemon:
             self._link_error = None
             self.link = self.make_link(self._end, self.role == "master", self._on_link_message, self._on_link_error)
             self.link.start()
-            self.log(f"link up as {self.role}")
+            log.info("link up as %s", self.role)
         except Exception as e:
             self._drop_link()
-            self._link_error = f"link: {e}"
+            msg = f"link: {e}"
+            if msg != self._link_error:  # retried every few seconds: report each distinct failure once
+                log.warning("link not up (retrying): %s", e)
+            self._link_error = msg
 
     def _drop_link(self) -> None:
         link, self.link = self.link, None
@@ -288,7 +295,7 @@ class Daemon:
     def run(self) -> int:
         self.start_server()
         self._publish(force=True)
-        self.log(f"openaten daemon running; status: {self.dir / 'status.json'}, control: {self.dir / 'ctl.sock'}")
+        log.info("openaten daemon running; status: %s, control: %s", self.dir / "status.json", self.dir / "ctl.sock")
         try:
             while not self.stop_flag.is_set():
                 self.run_once()
@@ -307,7 +314,7 @@ class Daemon:
         return 0
 
 
-def request(cmd: str, timeout: float = 2.0, directory: Optional[Path] = None, **fields) -> dict:
+def request(cmd: str, timeout: float = 2.0, directory: Path | None = None, **fields) -> dict:
     """Client side: send one command (with optional fields) to the running daemon and return its status reply."""
     import socket
 

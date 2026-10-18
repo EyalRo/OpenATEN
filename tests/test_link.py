@@ -1,12 +1,11 @@
 import os
-import threading
 import time
 
 import pytest
 
 from fake_transport import FakeBridge
 from openaten import link
-from openaten.link import Frame, LinkSession, SLOT, wire_len
+from openaten.link import SLOT, Frame, LinkSession, wire_len
 
 
 def test_frame_roundtrip():
