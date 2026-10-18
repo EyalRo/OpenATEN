@@ -14,7 +14,9 @@ import json
 import logging
 import os
 import queue
+import socket
 import socketserver
+import struct
 import threading
 import time
 from collections.abc import Callable
@@ -26,6 +28,9 @@ from . import control
 log = logging.getLogger(__name__)
 
 HEARTBEAT = 2.0
+LINK_RETRY_MIN = 2.0  # first retry after a link failure; doubles per consecutive failure up to LINK_RETRY_MAX
+LINK_RETRY_MAX = 30.0
+CLIENT_TIMEOUT = 5.0  # seconds a control-socket client may take to send its request
 RELEASE_AFTER = 2.0  # give the bridge end back this long after forwarding turned off
 
 
@@ -42,13 +47,27 @@ def socket_path() -> Path:
     return runtime_dir() / "ctl.sock"
 
 
+def _peer_uid(conn: socket.socket) -> int | None:
+    """uid of the process on the other end of a Unix socket (Linux SO_PEERCRED); None where unavailable."""
+    if not hasattr(socket, "SO_PEERCRED"):
+        return None
+    _pid, uid, _gid = struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
+    return uid
+
+
 class _Handler(socketserver.StreamRequestHandler):
+    timeout = CLIENT_TIMEOUT  # a client that connects and stays silent must not pin a thread
+
     def handle(self) -> None:
         daemon: Daemon = self.server.daemon  # type: ignore[attr-defined]
+        uid = _peer_uid(self.request)
+        if uid is not None and uid not in (0, os.getuid()):  # defence in depth: the socket is already 0600 in a 0700 directory
+            log.warning("rejected control connection from uid %d", uid)
+            return
         try:
             req = json.loads(self.rfile.readline(4096) or b"{}")
             cmd = req.get("cmd", "status")
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, TimeoutError):
             self.wfile.write(b'{"ok": false, "error": "bad request"}\n')
             return
         if cmd == "edge":
@@ -98,6 +117,7 @@ class Daemon:
         self.link: Any = None  # persistent link session (role mode): HID reports and hand-off messages ride on it
         self._link_error: str | None = None
         self._link_retry_at = 0.0
+        self._link_retry_delay = LINK_RETRY_MIN
         self.handoff = control.Handoff(self._push, self._pull, self._send_control)
         self._pending: tuple[str, float] | None = None  # border/row of a push waiting for forwarding to start
         self._was_forwarding = False
@@ -164,7 +184,8 @@ class Daemon:
         now = time.monotonic()
         if now < self._link_retry_at:
             return
-        self._link_retry_at = now + 2.0
+        self._link_retry_at = now + self._link_retry_delay
+        self._link_retry_delay = min(self._link_retry_delay * 2, LINK_RETRY_MAX)
         self._drop_link()
         try:
             cands = self._candidates()
@@ -174,6 +195,7 @@ class Daemon:
             self._link_error = None
             self.link = self.make_link(self._end, self.role == "master", self._on_link_message, self._on_link_error)
             self.link.start()
+            self._link_retry_delay = LINK_RETRY_MIN
             log.info("link up as %s", self.role)
         except Exception as e:
             self._drop_link()

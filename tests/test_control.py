@@ -20,7 +20,7 @@ def make(settle=0.5):
 
 
 def test_encode_decode_roundtrip_and_garbage():
-    assert c.decode(c.encode("give-back", border=KEY, row=5.0)) == {"kind": "give-back", "border": KEY, "row": 5.0}
+    assert c.decode(c.encode("give-back", border=KEY, row=5.0)) == {"v": 1, "kind": "give-back", "border": KEY, "row": 5.0}
     assert c.decode(b"not json") is None and c.decode(b"[1]") is None
 
 
@@ -30,7 +30,7 @@ def test_edge_enter_on_the_sending_side_starts_forwarding():
     assert log == [("push", KEY, 600.0)]
     h.started(KEY, 600.0)
     h.stopped()
-    assert log[1:] == [("send", {"kind": "take-control", "border": KEY, "row": 600.0}), ("send", {"kind": "release"})]
+    assert log[1:] == [("send", {"v": 1, "kind": "take-control", "border": KEY, "row": 600.0}), ("send", {"v": 1, "kind": "release"})]
 
 
 def test_receiver_gives_control_back_only_after_leaving_the_strip_and_settling():
@@ -43,7 +43,7 @@ def test_receiver_gives_control_back_only_after_leaving_the_strip_and_settling()
     assert h.receiving and log == []
     h.edge(KEY, 600.0, enter=False)  # moves into the screen...
     h.edge(KEY, 700.0, enter=True)  # ...and pushes back
-    assert not h.receiving and log == [("send", {"kind": "give-back", "border": KEY, "row": 700.0})]
+    assert not h.receiving and log == [("send", {"v": 1, "kind": "give-back", "border": KEY, "row": 700.0})]
 
 
 def test_events_during_the_settle_window_are_ignored():
@@ -80,3 +80,15 @@ def test_strip_source_ignores_motion_and_accepts_reported_rows():
     assert sw.remote_report(bytes([1, 0, 0, 0x9C, 0])) is False
     reports = sw.entering()
     assert reports and sw.remote.lo == [0, 800.0]
+
+
+def test_messages_from_a_newer_protocol_version_are_ignored_and_unversioned_ones_accepted():
+    assert c.decode(b'{"v": 2, "kind": "take-control"}') is None
+    assert c.decode(b'{"v": "x", "kind": "release"}') is None
+    assert c.decode(b'{"kind": "release"}') == {"kind": "release"}  # sent before the field existed
+
+
+def test_unknown_kinds_do_not_change_state():
+    h, _, log = make()
+    h.message({"kind": "from-the-future"})
+    assert not h.receiving and log == []
