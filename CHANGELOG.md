@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## Unreleased
 
 ### Added
+- Edge hand-off: `local_outputs = "niri"` reads this computer's screens from `niri msg --json outputs`; touchpads now drive the pointer tracker in motion mode (`touchpad_scale`). Not yet run against a real niri.
 - NixOS module (`nixosModules.default`, `services.openaten`): package, udev rule, kernel quirk, `input` group and a systemd user service; evaluated by `nix flake check`.
 - Release workflow publishes to PyPI via trusted publishing once `PUBLISH_TO_PYPI` is set (skipped until then); release steps in CONTRIBUTING.
 - Clipboard sharing (`daemon --clipboard`; text and PNG, wl-clipboard/xclip) and file transfer (`openaten send`, `daemon --receive-dir`) over the link, opt-in; see docs/applications.md. `status.json` gains `clipboard` and `transfers`. Not yet verified on hardware.

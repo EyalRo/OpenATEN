@@ -84,6 +84,18 @@ width = 1920
 height = 1200
 ```
 
+Two optional keys make the file shorter and let touchpads work in motion mode:
+
+```toml
+local_outputs = "niri"   # this computer's screens come from `niri msg --json outputs`; list only the other computer's screens in the file
+touchpad_scale = 1.0     # logical pixels per count of touchpad motion (motion mode only; libinput accelerates touchpads, so tune it)
+```
+
+With `local_outputs = "niri"` the `[[screen]]` entries for this host are replaced by niri's enabled outputs (logical position and size); if niri cannot be
+queried the file's entries are used and a WARNING is logged. The other computer's screens must be given in the same coordinate space as niri's logical
+space. The parser follows niri's documented JSON shape but has not been run against a real niri yet. In motion mode a touchpad now moves the dead-reckoned
+pointer too: pushing through the border starts forwarding once the finger lifts, and the next touch moves the other computer's pointer.
+
 `openaten layout` prints the borders it derived. `openaten forward` and `openaten daemon` pick the file up automatically (or pass `--screens`).
 
 Two ways to detect the edge push, chosen with `source` in the layout file:
