@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from . import protocol as pr
+from .errors import TransportError, TransportStall, TransportTimeout
 
 SLOT = 2048  # wire lengths are multiples of this; also the default frame size
 MAGIC = b"OATN"
@@ -32,18 +33,6 @@ _HDR = struct.Struct("<4sBBHIIIIIIII")  # magic ver kind flags seq ack next_len 
 _OVERHEAD = _HDR.size + 4  # header + crc32
 MAX_FRAME = 1 << 20  # 1 MiB frames (the hardware handled 2 MiB in tests)
 MAX_PAYLOAD = MAX_FRAME - _OVERHEAD
-
-
-class TransportError(Exception):
-    """A transport command failed."""
-
-
-class TransportTimeout(TransportError):
-    """The command was not accepted (out of turn / peer not ready) or did not finish in time."""
-
-
-class TransportStall(TransportError):
-    """The firmware stalled the pipe (an idle RX expired); reset and retry."""
 
 
 class Transport(Protocol):
@@ -324,39 +313,22 @@ class LinkSession:
 
 
 class UsbTransport:
-    """Adapts :class:`openaten.usb.BridgeEnd` to the :class:`Transport` protocol (timeouts in seconds)."""
+    """Adapts :class:`openaten.usb.BridgeEnd` to the :class:`Transport` protocol (timeouts in seconds).
+
+    ``BridgeEnd`` already raises the typed errors from :mod:`openaten.errors`, so this only converts units.
+    """
 
     def __init__(self, end):
-        import usb.core  # imported here so link.py works without pyusb (tests use a fake transport)
-
-        self.end, self._usb = end, usb.core
+        self.end = end
 
     def send(self, data: bytes, timeout: float) -> None:
-        try:
-            self.end.send(data, timeout=int(timeout * 1000))
-        except self._usb.USBError as e:
-            raise self._map(e) from e
+        self.end.send(data, timeout=int(timeout * 1000))
 
     def recv(self, size: int, timeout: float) -> bytes:
-        try:
-            return self.end.recv(size, timeout=int(timeout * 1000))
-        except self._usb.USBError as e:
-            raise self._map(e) from e
+        return self.end.recv(size, timeout=int(timeout * 1000))
 
     def hid(self, report: bytes, timeout: float) -> None:
-        try:
-            self.end.hid(report)
-        except self._usb.USBError as e:
-            raise self._map(e) from e
+        self.end.hid(report)
 
     def reset(self) -> None:
         self.end.reset()
-
-    @staticmethod
-    def _map(e: Exception) -> TransportError:
-        text = str(e).lower()
-        if "timed out" in text:
-            return TransportTimeout(str(e))
-        if "pipe" in text:
-            return TransportStall(str(e))
-        return TransportError(str(e))

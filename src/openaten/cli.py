@@ -7,11 +7,9 @@ import os
 import sys
 from pathlib import Path
 
-import usb.core
-import usb.util
-
 from . import ends, selftest
 from . import log as logsetup
+from .errors import TransportError
 from .forward import DEFAULT_HOTKEY
 from .link import LinkSession, UsbTransport
 from .usb import BridgeEnd, find_ends, port_path
@@ -34,7 +32,7 @@ def cmd_state(_args) -> int:
         try:
             role = e.role()
             print(f"port {port_path(e.dev)}: role={role} state={e.state():#04x}")
-        except usb.core.USBError as err:
+        except TransportError as err:
             e.reset()
             print(f"port {port_path(e.dev)}: error {err}")
     return 0

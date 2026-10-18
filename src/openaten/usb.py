@@ -5,15 +5,34 @@ bulk-only-transport command blocks, which avoids the kernel's SCSI opcode filter
 """
 from __future__ import annotations
 
+import functools
 import struct
 import time
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 import usb.core
 import usb.util
 
 from . import protocol as pr
+from .errors import TransportError, classify
 
 VID, PID = 0x05E3, 0x0627  # Genesys Logic "USB Storage" bridge function
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def _typed(fn: F) -> F:
+    """Public bridge commands raise :class:`~openaten.errors.TransportError`, never pyusb's ``USBError``."""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except usb.core.USBError as e:
+            raise classify(e) from e
+
+    return wrapper  # type: ignore[return-value]
 
 
 def port_path(dev: usb.core.Device) -> str:
@@ -78,7 +97,7 @@ class BridgeEnd:
     # -- bulk-only transport ----------------------------------------------------------
     def cmd(self, cb: bytes, data_in: int = 0, data_out: bytes = b"", timeout: int = 3000,
             cbw_timeout: int | None = None) -> tuple[int, bytes]:
-        """Run one command; returns (csw_status, data_in_bytes). Raises usb.core.USBError on stall/timeout.
+        """Run one command; returns (csw_status, data_in_bytes). Raises ``usb.core.USBError`` on stall/timeout (internal: the public commands below raise TransportError).
 
         ``cbw_timeout`` bounds how long the command block itself may be refused (the firmware refuses out-of-turn
         commands); it defaults to ``timeout``.
@@ -99,6 +118,7 @@ class BridgeEnd:
         raise usb.core.USBError("no matching CSW")
 
     # -- bridge commands --------------------------------------------------------------
+    @_typed
     def simple(self, cb: bytes, data_in: int = 0, data_out: bytes = b"", timeout: int = 1500) -> tuple[int, bytes]:
         """Run a stand-alone command (state, INQUIRY, HID). If the firmware refuses it, reset the transport and try once more.
 
@@ -129,13 +149,16 @@ class BridgeEnd:
         """Standard INQUIRY. In CD-ROM mode, 0x34 bytes include the vendor bytes (see docs/hardware.md)."""
         return self.simple(bytes([0x12, 0, 0, 0, length, 0]), data_in=length)[1]
 
+    @_typed
     def init(self) -> int:
         return self.cmd(pr.cdb(pr.CMD_INIT))[0]
 
+    @_typed
     def send(self, packet: bytes, timeout: int = 3000, cbw_timeout: int = 1000) -> None:
         """Send one message. Only accepted when it is our turn and the peer has a receive of the same length armed."""
         self.cmd(pr.cdb_tx(len(packet)), data_out=packet, timeout=timeout, cbw_timeout=min(cbw_timeout, timeout))
 
+    @_typed
     def recv(self, size: int = pr.PKT_LEN, timeout: int = 8000, cbw_timeout: int = 1000) -> bytes:
         """Wait for one message of up to `size` bytes.
 
@@ -156,7 +179,7 @@ class BridgeEnd:
         """'H' (master) or 'S' (slave), from the vendor INQUIRY bytes. Only available in CD-ROM mode."""
         try:
             d = self.inquiry(0x34)
-        except usb.core.USBError:
+        except TransportError:
             self.reset()
             time.sleep(0.3)
             return None

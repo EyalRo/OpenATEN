@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 import time
 
-from openaten.link import TransportError, TransportStall, TransportTimeout
+from openaten.errors import TransportError, TransportStall, TransportTimeout
 
 
 class FakeEnd:

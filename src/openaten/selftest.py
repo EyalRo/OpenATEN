@@ -12,6 +12,7 @@ import usb.util
 
 from . import ends as bridge_ends
 from . import protocol as pr
+from .errors import TransportError
 from .link import LinkSession, UsbTransport
 from .usb import port_path
 
@@ -33,7 +34,7 @@ def cmd_loopback(args) -> int:
         def rx():
             try:
                 got["p"] = dst.recv(timeout=4000)
-            except usb.core.USBError as e:
+            except TransportError as e:
                 got["e"] = e
 
         th = threading.Thread(target=rx)
@@ -41,7 +42,7 @@ def cmd_loopback(args) -> int:
         time.sleep(0.1)  # the receiver must be pending before the sender starts
         try:
             src.send(pkt)
-        except usb.core.USBError as e:
+        except TransportError as e:
             got.setdefault("e", e)
             src.reset()
         th.join()
