@@ -64,6 +64,24 @@ def test_messages_both_directions():
     assert p.got["s"] == [(1, b"to slave")] and p.got["m"] == [(2, b"to master")]
 
 
+def test_flush_waits_until_every_chunk_is_sent():
+    big = os.urandom(5 * link.MAX_PAYLOAD + 123)
+    with Pair() as p:
+        p.master.send_message(1, big)
+        assert p.master.flush(10)
+        assert not p.master._chunks
+        p.wait("s", 1)  # flush returns once the last chunk is taken: the slave completes the message right after
+    assert p.got["s"] == [(1, big)]
+
+
+def test_flush_gives_up_after_the_timeout_and_on_stop():
+    s = LinkSession(FakeBridge().a, True)  # never started: nothing drains the queue
+    s.send_message(1, b"x")
+    assert not s.flush(0.05)
+    s.stop()
+    assert not s.flush(5)
+
+
 def test_many_small_messages_keep_order():
     with Pair() as p:
         for i in range(50):
