@@ -1,0 +1,16 @@
+# Copy to ~/.config/openaten/config.toml. Everything is optional.
+# Precedence: command-line flag > $OPENATEN_LOG (log level only) > this file > built-in default.
+log_level = "INFO"
+
+[daemon]
+# role = "master"          # master on one computer, slave on the other
+# hotkey = "ctrl+alt+shift+k"
+# port = "1.2"             # USB port path of the bridge end to use (see `openaten list`)
+# max_active = 0           # seconds before forwarding gives control back on its own (0 = never)
+# screens = "~/.config/openaten/screens.toml"
+
+[forward]
+# hotkey = "ctrl+alt+shift+k"
+
+[strip]
+# screens = "~/.config/openaten/screens.toml"

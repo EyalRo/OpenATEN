@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import ends, selftest
+from . import config, ends, selftest
 from . import log as logsetup
 from .errors import TransportError
 from .forward import DEFAULT_HOTKEY
@@ -149,6 +149,7 @@ def cmd_ctl(args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="openaten", description=__doc__)
+    ap.add_argument("--config", help=f"config file with option defaults (default: {config.default_path()} if it exists)")
     ap.add_argument("--log-level", choices=logsetup.LEVELS, type=str.upper, help=f"log verbosity (default: ${logsetup.ENV_VAR} or INFO)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list", help="list bridge ends").set_defaults(fn=cmd_list)
@@ -185,8 +186,16 @@ def main(argv: list[str] | None = None) -> int:
     ct.add_argument("command", choices=["status", "on", "off", "toggle", "quit"])
     ct.set_defaults(fn=cmd_ctl)
     sub.add_parser("hid", help="HID injection round-trip test between two ends on this host").set_defaults(fn=selftest.cmd_hid)
+    pre, _ = ap.parse_known_args(argv)  # the config file's values become the defaults the real parse then lets flags override
+    try:
+        cfg = config.load(Path(pre.config) if pre.config else None, explicit=bool(pre.config))
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    for name, section in cfg.items():
+        if name in sub.choices:
+            sub.choices[name].set_defaults(**section)
     args = ap.parse_args(argv)
-    logsetup.setup(args.log_level)
+    logsetup.setup(args.log_level, fallback=cfg.get("log_level"))
     try:
         rc = args.fn(args)
     finally:

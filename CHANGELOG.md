@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## Unreleased
 
 ### Added
+- Optional `config.toml` for command defaults (`--config`, `contrib/config.example.toml`).
 - CI (ruff, mypy, pytest on Python 3.10-3.12), pre-commit, Dependabot, issue/PR templates, SECURITY and CONTRIBUTING.
 - Structured logging: `--log-level` / `OPENATEN_LOG`, standard levels on stderr.
 - Hand-off messages carry a protocol version (`v`); newer versions and unknown kinds are ignored.
@@ -19,6 +20,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Docs: architecture, troubleshooting, ADRs; coverage floor in CI.
 
 ### Changed
+- `BridgeEnd` commands raise typed `TransportError`s (`openaten.errors`) instead of pyusb's `USBError`.
 - Nix package runs the test suite and takes its version from `pyproject.toml`.
 - `cli.py` split: hardware self-tests in `selftest.py`, bridge-end bookkeeping in `ends.py`.
 - Version is read from package metadata.

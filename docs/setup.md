@@ -147,3 +147,11 @@ CI (`.github/workflows/ci.yml`) runs the same three on Python 3.10-3.12.
 `contrib/systemd/openaten.service` is a hardened systemd *user* unit; the header of the file has the install steps. Override `ExecStart`
 with `systemctl --user edit openaten` to pick the `--role` and `--screens`, and read the logs with `journalctl --user -u openaten`.
 The unit is untested on real hardware.
+
+## Config file
+
+Options can be set once in `~/.config/openaten/config.toml` (or `$XDG_CONFIG_HOME/openaten/config.toml`, or `openaten --config PATH ...`) instead of on
+every command line. See `contrib/config.example.toml` for the keys: `log_level` at the top level and per-command tables `[daemon]`, `[forward]`,
+`[strip]` and `[layout]` with the same names as the flags (`role`, `hotkey`, `port`, `max_active`, `screens`). Precedence: command-line flag >
+`OPENATEN_LOG` (log level only) > file > built-in default. Unknown keys and bad values are skipped with a WARNING; a missing default file is fine,
+but a file named with `--config` must exist and parse. The systemd unit's `ExecStart` can then stay `openaten daemon`.
