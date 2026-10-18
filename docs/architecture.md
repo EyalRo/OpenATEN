@@ -12,6 +12,8 @@ forward.py .... evdev capture: grabs the local keyboard/mouse and turns events i
 appmsg.py ..... framing for the clipboard and file channels; clipboard.py / transfer.py are the two application protocols on top
 control.py .... hand-off protocol between the two agents (JSON on link channel 1) and the Handoff state machine
 daemon.py ..... background service: owns the runner, the bridge end and the link; status.json + ctl.sock; restarts the link with backoff
+outputs.py ..... this computer's screens from the compositor (`niri msg --json outputs`), used by edges.load
+warp.py ....... extension point for placing the local pointer exactly (Warp protocol; only the null backend exists)
 strip.py ...... GTK4 layer-shell border strips that report exact pointer position to the daemon (separate process)
 cli.py ........ argument parsing and commands; selftest.py = hardware self-tests; ends.py = opened-ends bookkeeping
 noctalia/ ..... bar widget that reads status.json and talks to ctl.sock

@@ -2,7 +2,8 @@
 
 ## Requirements
 
-- Python 3.10+, `pyusb`, and the `libusb-1.0` library.
+- Python 3.10+, `pyusb`, and the `libusb-1.0` library (Debian/Ubuntu: `libusb-1.0-0`; Fedora: `libusb1`). Keyboard and mouse forwarding also needs `evdev`,
+  which builds a C extension (Python headers) or comes from your distribution's `python-evdev` package.
 - An ATEN US3342-class switch with **both** upstream USB-C ports connected to hosts (for development you can connect both
   to two ports of the same computer).
 
@@ -25,10 +26,23 @@ services.udev.extraRules = ''
 
 The rule file name/number matters: the `uaccess` tag is only honoured if applied before `73-seat-late.rules`.
 
+### Other distributions, and keeping the kernel away from the bridge
+
+The `uaccess` rule above needs systemd-logind. Without it, use a group instead, for example
+`SUBSYSTEM=="usb", ATTR{idVendor}=="05e3", ATTR{idProduct}=="0627", MODE="0660", GROUP="plugdev"` in `/etc/udev/rules.d/70-openaten.rules`, and add your user to that group.
+
+The kernel's `usb-storage` driver must not probe the bridge's mass-storage function (it can wedge the firmware, see [hardware.md](hardware.md)). Either add
+`usb-storage.quirks=05e3:0627:i` to the kernel command line, or create `/etc/modprobe.d/openaten.conf` containing `options usb-storage quirks=05e3:0627:i`
+(then rebuild the initramfs if your distribution loads `usb-storage` from it). The NixOS module below sets the kernel parameter for you.
+
+If anything hangs or the switch stops answering, power-cycle it (its power and both USB-C cables); [troubleshooting.md](troubleshooting.md) lists the symptoms.
+
 ## Install and try
 
 ```sh
 pip install -e .            # or: nix develop
+# or install the command only, without a checkout:
+pipx install 'git+https://github.com/EyalRo/OpenATEN'          # add [forward] for keyboard/mouse forwarding: '...OpenATEN[forward]'
 openaten list               # shows the bridge ends and their USB port paths
 openaten state              # role (H/S) and link state of each end
 openaten loopback -n 5      # packet round-trip between the two ends on this host
@@ -38,6 +52,14 @@ openaten link --mib 64      # link-layer self-test: messages both ways + 64 MiB 
 
 `loopback` and `hid` are the hardware self-tests. If either hangs or fails, see the rules in [hardware.md](hardware.md) and
 power-cycle the switch.
+
+## Roles: master and slave
+
+Pick one computer to run `openaten daemon --role master` and the other `--role slave`. These are *application* roles for the link (the master polls, the slave
+answers; see [design.md](design.md)). They are independent of the `H`/`S` role that `openaten state` reports for each physical end of the switch, which did not
+constrain who may initiate in our tests ([hardware.md](hardware.md)), so either computer can be either. Everything works in both directions whichever you pick;
+the only difference is latency: the master sends immediately, while the slave's messages wait for the next poll (fast while anything is flowing, at most about a
+second when idle). Choose the computer you type on most as the master.
 
 ## Input forwarding (keyboard and mouse to the other computer)
 

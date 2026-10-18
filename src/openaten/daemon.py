@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from . import appmsg, control
+from .warp import NullWarp, Warp
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ HEARTBEAT = 2.0
 LINK_RETRY_MIN = 2.0  # first retry after a link failure; doubles per consecutive failure up to LINK_RETRY_MAX
 LINK_RETRY_MAX = 30.0
 CLIENT_TIMEOUT = 5.0  # seconds a control-socket client may take to send its request
+WARP_DELAY = 0.15  # after take-control: lets the sender's approximate placement reports land first, so the exact position wins
 RELEASE_AFTER = 2.0  # give the bridge end back this long after forwarding turned off
 
 
@@ -114,6 +116,7 @@ class Daemon:
         hotplug: Callable[[Callable[[str], None]], Any] | None = None,
         make_clipboard: Callable[[Callable[[bytes], bool]], Any] | None = None,
         make_transfers: Callable[[Callable[[bytes], bool]], Any] | None = None,
+        warp: Warp | None = None,
     ):
         self.dir = directory or runtime_dir()
         self.make_runner, self.find_ends, self.open_end = make_runner, find_ends, open_end
@@ -127,6 +130,8 @@ class Daemon:
         self._link_retry_at = 0.0
         self._link_retry_delay = LINK_RETRY_MIN
         self.handoff = control.Handoff(self._push, self._pull, self._send_control)
+        self.warp: Warp = warp or NullWarp()  # exact pointer placement; the null backend leaves hand-off approximate (see openaten.warp)
+        self._warp_due: tuple[float, str, float] | None = None
         # Application protocols on the link (opt-in; None when disabled). Each is handed a send function that returns False while the link is down.
         self.clipboard: Any = make_clipboard(lambda data: self._send_app(appmsg.CH_CLIPBOARD, data)) if make_clipboard else None
         self.transfers: Any = make_transfers(lambda data: self._send_app(appmsg.CH_FILES, data)) if make_transfers else None
@@ -265,6 +270,29 @@ class Daemon:
                 log.warning("link not up (retrying): %s", e)
             self._link_error = msg
 
+    def _warp_for(self, msg: dict) -> None:
+        """Exact pointer placement for a hand-off message: after take-control (delayed) and on give-back (at once)."""
+        border, row = msg.get("border"), msg.get("row")
+        if not isinstance(border, str) or isinstance(row, bool) or not isinstance(row, int | float):
+            return
+        if msg.get("kind") == "take-control":
+            self._warp_due = (time.monotonic() + WARP_DELAY, border, float(row))
+        elif msg.get("kind") == "give-back":
+            self._warp_due = None
+            self._place_pointer(border, float(row))
+
+    def _place_pointer(self, border: str, row: float) -> None:
+        switch = getattr(self.runner, "edges", None)
+        point = switch.entry_point(border, row) if switch is not None else None
+        if point is None:
+            return
+        try:
+            placed = self.warp.place(*point)
+        except Exception:
+            log.exception("pointer placement failed")
+            return
+        log.debug("pointer placement at %s: %s", point, "done" if placed else "declined")
+
     def _on_hotplug(self, action: str) -> None:
         """The bridge appeared or disappeared: reconnect now instead of waiting out the retry backoff."""
         log.info("bridge %s", action)
@@ -364,6 +392,7 @@ class Daemon:
                     self.handoff.edge(cmd[1], cmd[2], cmd[3])
                 elif cmd[0] == "peer":
                     self.handoff.message(cmd[1])
+                    self._warp_for(cmd[1])
                 elif cmd[0] == "hotplug":
                     self._on_hotplug(cmd[1])
                 elif cmd[0] == "app":
@@ -377,6 +406,10 @@ class Daemon:
             else:
                 self.runner.request(cmd == "on")
         self.runner.step(timeout)
+        if self._warp_due is not None and time.monotonic() >= self._warp_due[0]:
+            _, border, row = self._warp_due
+            self._warp_due = None
+            self._place_pointer(border, row)
         if self.clipboard is not None and self.link is not None:
             self.clipboard.poll()
         if self.transfers is not None:

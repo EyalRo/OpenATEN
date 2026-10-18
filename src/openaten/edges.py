@@ -212,6 +212,18 @@ class EdgeSwitch:
         self._exit = (i, row)
         return True
 
+    def entry_point(self, key: str, row: float) -> tuple[float, float] | None:
+        """Where to put this computer's own pointer for a crossing of border ``key`` at ``row``: the last pixel inside the border, or None.
+
+        ``row`` is the coordinate along the border in the shared space (the same number both computers use), clamped to the shared segment.
+        """
+        if key not in self.keys:
+            return None
+        edge = self.pairs[self.keys.index(key)][0]  # this computer's side of the border
+        inside = edge.line - 1 if edge.sign > 0 else edge.line  # the border line itself belongs to the far side when leaving to the right/bottom
+        along = min(max(row, edge.lo), edge.hi)
+        return (inside, along) if edge.axis == 0 else (along, inside)
+
     def entering(self) -> list[bytes]:
         """Called when forwarding starts: reports that put the other computer's pointer at the border we crossed (none after a hotkey)."""
         crossing, self._exit = self._exit, None
