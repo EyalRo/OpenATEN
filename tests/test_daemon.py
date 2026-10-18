@@ -105,6 +105,16 @@ def test_injection_without_a_bridge_raises_so_the_runner_can_give_control_back(t
         d._send_report(b"x")
 
 
+def test_status_is_complete_before_the_first_loop_iteration(tmp_path):
+    d, _, _ = make(tmp_path)
+    d.start_server()
+    try:
+        reply = dm.request("status", directory=tmp_path)  # no run_once yet: this used to be a bare {"ok": true}
+        assert reply["ok"] is True and reply["bridge"] == "present" and "forwarding" in reply
+    finally:
+        d._server.shutdown()
+
+
 def test_control_socket_roundtrip(tmp_path):
     d, runners, _ = make(tmp_path)
     d.start_server()

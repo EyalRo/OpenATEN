@@ -371,6 +371,7 @@ class Daemon:
         self._server = _Server(str(sock), _Handler)
         self._server.daemon = self  # type: ignore[attr-defined]
         os.chmod(sock, 0o600)
+        self._publish()  # a request that beats the first loop iteration must still see a full status, not an empty snapshot
         threading.Thread(target=self._server.serve_forever, name="openaten-ctl", daemon=True).start()
 
     def run_once(self, timeout: float = 0.1) -> None:
