@@ -155,3 +155,15 @@ every command line. See `contrib/config.example.toml` for the keys: `log_level` 
 `[strip]` and `[layout]` with the same names as the flags (`role`, `hotkey`, `port`, `max_active`, `screens`). Precedence: command-line flag >
 `OPENATEN_LOG` (log level only) > file > built-in default. Unknown keys and bad values are skipped with a WARNING; a missing default file is fine,
 but a file named with `--config` must exist and parse. The systemd unit's `ExecStart` can then stay `openaten daemon`.
+
+## Clipboard and file transfer
+
+Both are opt-in and need `--role` on both computers; details in [applications.md](applications.md).
+
+```sh
+openaten daemon --role master --clipboard --receive-dir ~/Downloads/OpenATEN    # computer A
+openaten daemon --role slave  --clipboard --receive-dir ~/Downloads/OpenATEN    # computer B
+openaten send photo.jpg report.pdf                                              # on either: sends to the other computer
+```
+
+Install `wl-clipboard` (Wayland) or `xclip` (X11) for clipboard sharing. Put the options in `config.toml` (`clipboard = true`, `receive_dir = "..."`) to keep them out of the service unit.

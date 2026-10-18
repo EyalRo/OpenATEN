@@ -9,6 +9,7 @@ link.py ....... reliable message link on top of one end: framing + CRC, chunking
 hid.py, edges.py
                input event decoding / key chords (hid.py) and the screen-layout geometry for edge hand-off (edges.py); pure logic
 forward.py .... evdev capture: grabs the local keyboard/mouse and turns events into HID reports (EvdevRunner, Forwarder)
+appmsg.py ..... framing for the clipboard and file channels; clipboard.py / transfer.py are the two application protocols on top
 control.py .... hand-off protocol between the two agents (JSON on link channel 1) and the Handoff state machine
 daemon.py ..... background service: owns the runner, the bridge end and the link; status.json + ctl.sock; restarts the link with backoff
 strip.py ...... GTK4 layer-shell border strips that report exact pointer position to the daemon (separate process)

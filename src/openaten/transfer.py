@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import secrets
 import shutil
 import time
@@ -39,6 +40,8 @@ MAX_INCOMING = 4
 MAX_CHUNK = 16 << 20  # the largest chunk a receiver accepts, whatever the sender's chunk size
 KEEP_FINISHED = 10
 DISK_RESERVE = 1 << 20
+
+ID_RE = re.compile(r"[0-9A-Za-z_-]{1,64}")  # ids become part of a file name: nothing the peer sends may contain a path separator
 
 ACTIVE = ("offered", "sending", "finishing", "receiving")
 
@@ -197,7 +200,7 @@ class TransferManager:
 
     def _offer(self, h: dict) -> None:
         tid, size, name = h.get("id"), h.get("size"), safe_name(h.get("name"))
-        if not isinstance(tid, str) or not tid or len(tid) > 64:
+        if not isinstance(tid, str) or not ID_RE.fullmatch(tid):
             return
         if self.receive_dir is None:
             return self._reject(tid, "receiving is not enabled on the other computer")
@@ -300,6 +303,8 @@ class TransferManager:
     # -- dispatch ---------------------------------------------------------------------
     def on_message(self, header: dict, payload: bytes) -> None:
         kind, tid = header.get("kind"), header.get("id")
+        if not isinstance(tid, str):
+            return
         if kind == "offer":
             return self._offer(header)
         if kind == "chunk":

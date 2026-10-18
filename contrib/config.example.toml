@@ -8,6 +8,8 @@ log_level = "INFO"
 # port = "1.2"             # USB port path of the bridge end to use (see `openaten list`)
 # max_active = 0           # seconds before forwarding gives control back on its own (0 = never)
 # screens = "~/.config/openaten/screens.toml"
+# clipboard = true                       # share the clipboard (text, PNG) with the other computer
+# receive_dir = "~/Downloads/OpenATEN"   # accept files from `openaten send` on the other computer
 
 [forward]
 # hotkey = "ctrl+alt+shift+k"

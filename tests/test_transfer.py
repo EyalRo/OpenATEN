@@ -240,3 +240,14 @@ def test_file_that_shrinks_while_sending_fails(tmp_path):
     p.run()
     assert p.a.status()[0]["state"] == "failed"
     assert not list((tmp_path / "in").iterdir())
+
+
+@pytest.mark.parametrize("bad_id", ["../../evil", "a/b", "a\\b", "", "x" * 65, ".", "..", "a b", 5, None, ["x"], {"a": 1}])
+def test_hostile_transfer_ids_are_ignored_not_trusted(tmp_path, bad_id):
+    p = Pair(tmp_path)
+    p.b.on_message({"kind": "offer", "id": bad_id, "name": "f", "size": 1}, b"")
+    p.b.on_message({"kind": "chunk", "id": bad_id, "n": 0}, b"x")
+    p.b.on_message({"kind": "done", "id": bad_id, "size": 1, "sha256": "0"}, b"")
+    p.b.on_message({"kind": "cancel", "id": bad_id}, b"")
+    p.a.on_message({"kind": "ack", "id": bad_id, "n": 0}, b"")
+    assert p.b.status() == [] and not (tmp_path / "in").exists() and not (tmp_path / "evil").exists()

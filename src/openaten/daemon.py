@@ -200,10 +200,13 @@ class Daemon:
             return
         target = self.clipboard if channel == appmsg.CH_CLIPBOARD else self.transfers
         if target is None:
-            if channel == appmsg.CH_FILES and parsed[0].get("kind") == "offer":
-                self._send_app(channel, appmsg.pack("reject", id=parsed[0].get("id"), reason="file transfer is not enabled on the other computer"))
+            if channel == appmsg.CH_FILES and parsed[0].get("kind") == "offer" and isinstance(parsed[0].get("id"), str):
+                self._send_app(channel, appmsg.pack("reject", id=parsed[0]["id"], reason="file transfer is not enabled on the other computer"))
             return
-        target.on_message(*parsed)
+        try:
+            target.on_message(*parsed)
+        except Exception:  # the peer's messages are untrusted: whatever they do, the daemon (and the hotkey) must keep running
+            log.exception("error handling a message on channel %d", channel)
 
     def transfer_request(self, cmd: str, req: dict) -> dict:
         """Control-socket thread: run a send/cancel on the main loop and return its outcome."""

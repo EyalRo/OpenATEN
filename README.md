@@ -12,7 +12,7 @@ provide the same features on Linux, **without the network**, so they keep workin
 
 > **Status: experimental research code (v0.1).** The transport and a reliable message link work on real hardware in loopback:
 > messages flow both ways at ~75-90 MB/s, survive process crashes (self-resync), and keyboard/mouse reports injected on one end
-> arrive on the other. The cross-screen, clipboard and file-transfer applications are **not built yet** (they sit on the link). Interoperability with the vendor's
+> arrive on the other. Edge hand-off, clipboard sharing and file transfer sit on the link; the last two are built and unit-tested against a fake link but have **not** been run on hardware yet. Interoperability with the vendor's
 > own software has **not** been demonstrated. Read [docs/hardware.md](docs/hardware.md) before running anything: a few
 > command patterns can wedge the switch's firmware until it is power-cycled.
 
@@ -25,6 +25,7 @@ provide the same features on Linux, **without the network**, so they keep workin
 | Reliable messaging link (framing, CRC, chunking, polling, auto-resync) | `openaten link --mib 64` |
 | Keyboard/mouse injection onto the other end's HID interface | `openaten hid` |
 | Edge hand-off between the computers' screens (mouse pushes through the shared border) | [docs/setup.md](docs/setup.md#edge-hand-off-push-the-pointer-through-the-screen-border) |
+| Clipboard sharing and file transfer between the computers (opt-in, **untested on hardware**) | [docs/applications.md](docs/applications.md) |
 | Documented command and packet formats | [docs/protocol.md](docs/protocol.md) |
 
 ## Quick start

@@ -141,3 +141,36 @@ def test_detect_without_tools_or_display_returns_none(monkeypatch, caplog):
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
     monkeypatch.delenv("DISPLAY", raising=False)
     assert clipboard.detect() is None and "disabled" in caplog.text
+
+
+def test_failing_clipboard_tool_backs_off_instead_of_stalling_the_loop(caplog):
+    class Broken:
+        calls = 0
+
+        def read(self):
+            self.calls += 1
+            raise TimeoutError("wl-paste did not answer")
+
+        def write(self, clip):
+            raise AssertionError
+
+    backend, clock = Broken(), Clock()
+    sync = ClipboardSync(backend, lambda d: True, interval=0.5, now=clock)
+    for _ in range(40):
+        clock.t += 1
+        sync.poll()
+    assert backend.calls < 15  # the retry delay grew towards the 30 s cap
+    assert caplog.text.count("retrying less often") == 1
+    backend.read = lambda: Clip(TEXT, b"x")  # the tool recovers
+    clock.t += 31
+    sync.poll()
+    assert sync._delay == 0.5
+
+
+def test_command_backend_raises_on_a_hung_tool(monkeypatch):
+    def hang(argv, capture_output, timeout):
+        raise clipboard.subprocess.TimeoutExpired(argv, timeout)
+
+    monkeypatch.setattr(clipboard.subprocess, "run", hang)
+    with pytest.raises(TimeoutError):
+        clipboard.CommandBackend(wayland=True).read()

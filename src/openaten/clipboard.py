@@ -23,6 +23,8 @@ log = logging.getLogger(__name__)
 TEXT, PNG = "text/plain", "image/png"
 MIMES = (TEXT, PNG)
 MAX_BYTES = 8 << 20
+TOOL_TIMEOUT = 2.0  # the daemon's main loop (and its hotkey) waits for the tool, so keep this short
+MAX_BACKOFF = 30.0
 
 
 @dataclass(frozen=True)
@@ -57,11 +59,11 @@ class CommandBackend:
         self.wayland = wayland
 
     def _run(self, argv: list[str]) -> bytes | None:
+        """Tool output, or None when it exits non-zero (e.g. an empty clipboard). A missing tool or a hang raises OSError/TimeoutError."""
         try:
-            done = subprocess.run(argv, capture_output=True, timeout=3)
-        except (OSError, subprocess.TimeoutExpired) as e:
-            log.debug("%s failed: %s", argv[0], e)
-            return None
+            done = subprocess.run(argv, capture_output=True, timeout=TOOL_TIMEOUT)
+        except subprocess.TimeoutExpired as e:
+            raise TimeoutError(f"{argv[0]} did not answer within {TOOL_TIMEOUT:g}s") from e
         return done.stdout if done.returncode == 0 else None
 
     def _types(self) -> list[str]:
@@ -107,6 +109,7 @@ class ClipboardSync:
     def __init__(self, backend: Backend, send: Callable[[bytes], bool], max_bytes: int = MAX_BYTES, interval: float = 0.5, now: Callable[[], float] = time.monotonic):
         self.backend, self.send, self.max_bytes, self.interval, self.now = backend, send, max_bytes, interval, now
         self._next = 0.0
+        self._delay = interval  # grows while the clipboard tool keeps failing, so a broken session does not stall the daemon's loop
         self._last: str | None = None  # digest of the clip already handled (sent, received or the start-up baseline)
         self._primed = False
         self._warned: str | None = None
@@ -115,8 +118,16 @@ class ClipboardSync:
         t = self.now()
         if t < self._next:
             return
+        try:
+            clip = self.backend.read()
+        except OSError as e:  # includes TimeoutError and a missing tool
+            if self._delay == self.interval:
+                log.warning("clipboard tool failed (%s); retrying less often", e)
+            self._delay = min(self._delay * 2, MAX_BACKOFF)
+            self._next = t + self._delay
+            return
+        self._delay = self.interval
         self._next = t + self.interval
-        clip = self.backend.read()
         if not self._primed:  # whatever is on the clipboard at start-up stays private
             self._primed = True
             self._last = clip.digest if clip else None

@@ -422,3 +422,18 @@ def test_cli_send_without_a_daemon_reports_it(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     assert cli.main(["send", "whatever.txt"]) == 1
     assert "daemon not running" in capsys.readouterr().out
+
+
+def test_a_hostile_file_message_cannot_crash_the_daemon(tmp_path):
+    from openaten import appmsg
+    from openaten.transfer import TransferManager
+
+    d, _, links = make_linked(tmp_path, make_transfers=lambda send: TransferManager(send, tmp_path / "in"))
+    d.dir.mkdir(exist_ok=True)
+    d.run_once()
+    for header in ({"kind": "chunk", "id": ["x"], "n": 0}, {"kind": "offer", "id": {"a": 1}, "name": 5, "size": "big"}, {"kind": "ack", "id": None}):
+        links[0].on_message(appmsg.CH_FILES, 5, appmsg.pack(header.pop("kind"), **header))
+    links[0].on_message(appmsg.CH_FILES, 6, b"\xff\xff\xff\xffgarbage")
+    d.run_once()
+    d.run_once()
+    assert not d.stop_flag.is_set()
