@@ -70,3 +70,17 @@ def test_flags_override_environment_which_overrides_file(tmp_path, monkeypatch):
 def test_explicit_missing_config_exits(tmp_path):
     with pytest.raises(SystemExit):
         cli.main(["--config", str(tmp_path / "nope.toml"), "list"])
+
+
+def test_daemon_clipboard_and_receive_dir_keys(tmp_path, monkeypatch):
+    p = write(tmp_path, '[daemon]\nclipboard = true\nreceive_dir = "~/Incoming"\nrole = "slave"\n')
+    got = run_cli_capturing_daemon_args(monkeypatch, ["--config", str(p), "daemon"])
+    assert got["clipboard"] is True and got["receive_dir"].endswith("/Incoming") and not got["receive_dir"].startswith("~")
+    got = run_cli_capturing_daemon_args(monkeypatch, ["--config", str(p), "daemon", "--no-clipboard"])
+    assert got["clipboard"] is False  # a flag can switch a file default off
+
+
+def test_bool_option_with_a_string_value_is_rejected(tmp_path, caplog):
+    with caplog.at_level(logging.WARNING, logger="openaten.config"):
+        assert config.load(write(tmp_path, '[daemon]\nclipboard = "yes"\n')) == {"daemon": {}}
+    assert "clipboard must be bool" in caplog.text

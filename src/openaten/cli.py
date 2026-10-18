@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
 from pathlib import Path
 
-from . import config, ends, hotplug, selftest
+from . import clipboard, config, ends, hotplug, selftest
 from . import log as logsetup
+from .clipboard import ClipboardSync
 from .errors import TransportError
 from .forward import DEFAULT_HOTKEY
 from .link import LinkSession, UsbTransport
+from .transfer import TransferManager
 from .usb import BridgeEnd, find_ends, port_path
 
 log = logging.getLogger(__name__)
@@ -95,6 +98,28 @@ def cmd_forward(args) -> int:
         return 1
 
 
+def _make_clipboard(send):
+    backend = clipboard.detect()
+    return ClipboardSync(backend, send) if backend is not None else None
+
+
+def cmd_send(args) -> int:
+    """Ask the running daemon to send files to the other computer (the other daemon must run with --receive-dir)."""
+    from . import daemon as dm
+
+    rc = 0
+    for name in args.files:
+        path = os.path.abspath(name)
+        try:
+            reply = dm.request("send", path=path)
+        except OSError:
+            print(json.dumps({"ok": False, "error": "daemon not running"}))
+            return 1
+        print(f"{name}: " + (f"offered (transfer {reply['id']})" if reply.get("ok") else f"failed: {reply.get('error')}"))
+        rc = rc or (0 if reply.get("ok") else 1)
+    return rc
+
+
 def cmd_daemon(args) -> int:
     """Run the background service: input forwarder + status file + control socket (see openaten.daemon)."""
     from . import daemon as dm
@@ -110,6 +135,8 @@ def cmd_daemon(args) -> int:
         hotkey=args.hotkey,
         role=args.role,
         hotplug=hotplug.start,
+        make_clipboard=(lambda send: _make_clipboard(send)) if args.clipboard else None,
+        make_transfers=lambda send: TransferManager(send, Path(args.receive_dir).expanduser() if args.receive_dir else None),
         make_link=lambda end, master, on_message, on_error: LinkSession(UsbTransport(end), master, on_message, poll_idle=0.02, on_error=on_error),
     )
     import signal
@@ -134,8 +161,6 @@ def cmd_strip(args) -> int:
 
 def cmd_ctl(args) -> int:
     """Send a command to the running daemon and print its status as JSON."""
-    import json
-
     from . import daemon as dm
 
     try:
@@ -176,6 +201,8 @@ def main(argv: list[str] | None = None) -> int:
     dm_.add_argument("--max-active", type=float, default=0, help="safety: return control after this many seconds (0 = never)")
     dm_.add_argument("--role", choices=["master", "slave"], help="keep a link to the other computer's agent (run master on one computer, slave on the other); needed for the strip's exact hand-off")
     dm_.add_argument("--screens", help="screen layout TOML for edge hand-off (default: ~/.config/openaten/screens.toml if it exists)")
+    dm_.add_argument("--clipboard", action=argparse.BooleanOptionalAction, default=False, help="share the clipboard (text, PNG) with the other computer (needs --role)")
+    dm_.add_argument("--receive-dir", help="accept files sent with `openaten send` on the other computer into this directory (off by default)")
     dm_.set_defaults(fn=cmd_daemon)
     sp = sub.add_parser("strip", help="invisible border strips that report the exact pointer position at the shared screen borders")
     sp.add_argument("--screens", help="screen layout TOML (default: ~/.config/openaten/screens.toml)")
@@ -183,6 +210,9 @@ def main(argv: list[str] | None = None) -> int:
     ly = sub.add_parser("layout", help="show the borders derived from the screen layout")
     ly.add_argument("--screens", help="screen layout TOML (default: ~/.config/openaten/screens.toml)")
     ly.set_defaults(fn=cmd_layout)
+    sd = sub.add_parser("send", help="send files to the other computer through the running daemon")
+    sd.add_argument("files", nargs="+")
+    sd.set_defaults(fn=cmd_send)
     ct = sub.add_parser("ctl", help="control the running daemon")
     ct.add_argument("command", choices=["status", "on", "off", "toggle", "quit"])
     ct.set_defaults(fn=cmd_ctl)

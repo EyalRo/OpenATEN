@@ -23,7 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import control
+from . import appmsg, control
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +78,9 @@ class _Handler(socketserver.StreamRequestHandler):
                 return
             self.wfile.write(json.dumps(dict(daemon.snapshot(), ok=True)).encode() + b"\n")
             return
+        if cmd in ("send", "cancel"):
+            self.wfile.write(json.dumps(daemon.transfer_request(cmd, req)).encode() + b"\n")
+            return
         if cmd not in ("status", "on", "off", "toggle", "quit"):
             self.wfile.write(json.dumps({"ok": False, "error": f"unknown command {cmd!r}"}).encode() + b"\n")
             return
@@ -109,6 +112,8 @@ class Daemon:
         role: str | None = None,
         make_link: Callable[..., object] | None = None,
         hotplug: Callable[[Callable[[str], None]], Any] | None = None,
+        make_clipboard: Callable[[Callable[[bytes], bool]], Any] | None = None,
+        make_transfers: Callable[[Callable[[bytes], bool]], Any] | None = None,
     ):
         self.dir = directory or runtime_dir()
         self.make_runner, self.find_ends, self.open_end = make_runner, find_ends, open_end
@@ -122,6 +127,9 @@ class Daemon:
         self._link_retry_at = 0.0
         self._link_retry_delay = LINK_RETRY_MIN
         self.handoff = control.Handoff(self._push, self._pull, self._send_control)
+        # Application protocols on the link (opt-in; None when disabled). Each is handed a send function that returns False while the link is down.
+        self.clipboard: Any = make_clipboard(lambda data: self._send_app(appmsg.CH_CLIPBOARD, data)) if make_clipboard else None
+        self.transfers: Any = make_transfers(lambda data: self._send_app(appmsg.CH_FILES, data)) if make_transfers else None
         self._pending: tuple[str, float] | None = None  # border/row of a push waiting for forwarding to start
         self._was_forwarding = False
         self.runner: Any = None
@@ -169,10 +177,57 @@ class Daemon:
         if self.link is not None:
             self.link.send_message(control.CH_CONTROL, data)
 
+    def _send_app(self, channel: int, data: bytes) -> bool:
+        link = self.link
+        if link is None or self._link_error is not None:
+            return False
+        link.send_message(channel, data)
+        return True
+
     def _on_link_message(self, channel: int, msg_id: int, data: bytes) -> None:
-        msg = control.decode(data) if channel == control.CH_CONTROL else None
-        if msg is not None:
-            self.commands.put(("peer", msg))
+        """Link thread: hand everything to the main loop, where all state is touched."""
+        if channel == control.CH_CONTROL:
+            msg = control.decode(data)
+            if msg is not None:
+                self.commands.put(("peer", msg))
+        elif channel in (appmsg.CH_CLIPBOARD, appmsg.CH_FILES):
+            self.commands.put(("app", channel, data))
+
+    def _on_app_message(self, channel: int, data: bytes) -> None:
+        parsed = appmsg.unpack(data)
+        if parsed is None:
+            log.debug("dropped a malformed message on channel %d", channel)
+            return
+        target = self.clipboard if channel == appmsg.CH_CLIPBOARD else self.transfers
+        if target is None:
+            if channel == appmsg.CH_FILES and parsed[0].get("kind") == "offer":
+                self._send_app(channel, appmsg.pack("reject", id=parsed[0].get("id"), reason="file transfer is not enabled on the other computer"))
+            return
+        target.on_message(*parsed)
+
+    def transfer_request(self, cmd: str, req: dict) -> dict:
+        """Control-socket thread: run a send/cancel on the main loop and return its outcome."""
+        if self.transfers is None:
+            return {"ok": False, "error": "file transfer is not available (the daemon needs --role)"}
+        reply: queue.Queue = queue.Queue(1)
+        self.commands.put(("transfer", cmd, req, reply))
+        try:
+            return reply.get(timeout=3)
+        except queue.Empty:
+            return {"ok": False, "error": "the daemon did not answer in time"}
+
+    def _run_transfer_command(self, cmd: str, req: dict, reply: queue.Queue) -> None:
+        try:
+            if cmd == "send":
+                path = req.get("path")
+                if not isinstance(path, str) or not os.path.isabs(path):
+                    raise ValueError("send needs an absolute path")
+                reply.put({"ok": True, "id": self.transfers.send_file(path)})
+            else:
+                tid = req.get("id")
+                reply.put({"ok": bool(isinstance(tid, str) and self.transfers.cancel(tid)), "error": None})
+        except ValueError as e:
+            reply.put({"ok": False, "error": str(e)})
 
     def _on_link_error(self, e: Exception) -> None:
         self._link_error = f"link: {e}"
@@ -218,6 +273,8 @@ class Daemon:
 
     def _drop_link(self) -> None:
         link, self.link = self.link, None
+        if self.transfers is not None:
+            self.transfers.link_lost()  # nothing in flight survives a new link session
         if link is not None:
             try:
                 link.stop(timeout=3.0)
@@ -257,6 +314,8 @@ class Daemon:
             "devices": r["devices"],
             "role": self.role,
             "receiving": self.handoff.receiving,
+            "clipboard": self.clipboard is not None,
+            "transfers": self.transfers.status() if self.transfers is not None else [],
             "error": r.get("error") or self.error or self._link_error,
         }
 
@@ -290,6 +349,8 @@ class Daemon:
             if not self.runner.open():
                 self.error = "no readable keyboard/mouse devices (is the user in the 'input' group?)"
         self._ensure_link()
+        if self._link_error is not None and self.transfers is not None:
+            self.transfers.link_lost()  # fail in-flight transfers now rather than after their idle timeout
         while True:
             try:
                 cmd = self.commands.get_nowait()
@@ -302,6 +363,10 @@ class Daemon:
                     self.handoff.message(cmd[1])
                 elif cmd[0] == "hotplug":
                     self._on_hotplug(cmd[1])
+                elif cmd[0] == "app":
+                    self._on_app_message(cmd[1], cmd[2])
+                elif cmd[0] == "transfer":
+                    self._run_transfer_command(cmd[1], cmd[2], cmd[3])
             elif cmd == "quit":
                 self.stop_flag.set()
             elif cmd == "toggle":
@@ -309,6 +374,10 @@ class Daemon:
             else:
                 self.runner.request(cmd == "on")
         self.runner.step(timeout)
+        if self.clipboard is not None and self.link is not None:
+            self.clipboard.poll()
+        if self.transfers is not None:
+            self.transfers.pump()
         forwarding = self.runner.status()["forwarding"]
         if forwarding != self._was_forwarding:
             self._was_forwarding = forwarding

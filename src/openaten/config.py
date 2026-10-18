@@ -8,6 +8,8 @@
     port = "1.2"
     max_active = 0
     screens = "~/.config/openaten/screens.toml"
+    clipboard = true                      # share the clipboard with the other computer (text and PNG images)
+    receive_dir = "~/Downloads/OpenATEN"  # accept files sent from the other computer into this directory
 """
 from __future__ import annotations
 
@@ -23,7 +25,15 @@ log = logging.getLogger(__name__)
 # Per-command options a file may set: key -> accepted types (the option's argparse ``dest``).
 COMMAND_KEYS: dict[str, dict[str, tuple[type, ...]]] = {
     "forward": {"port": (str,), "hotkey": (str,), "max_active": (int, float), "screens": (str,)},
-    "daemon": {"port": (str,), "hotkey": (str,), "max_active": (int, float), "screens": (str,), "role": (str,)},
+    "daemon": {
+        "port": (str,),
+        "hotkey": (str,),
+        "max_active": (int, float),
+        "screens": (str,),
+        "role": (str,),
+        "clipboard": (bool,),
+        "receive_dir": (str,),
+    },
     "strip": {"screens": (str,)},
     "layout": {"screens": (str,)},
 }
@@ -43,7 +53,7 @@ def _toml():
 
 
 def _valid(where: str, key: str, value: Any, types: tuple[type, ...]) -> bool:
-    if isinstance(value, bool) or not isinstance(value, types):
+    if (isinstance(value, bool) and bool not in types) or not isinstance(value, types):
         log.warning("config: %s%s must be %s, ignoring it", where, key, "/".join(t.__name__ for t in types))
         return False
     if key in CHOICES and value not in CHOICES[key]:
@@ -85,7 +95,7 @@ def load(path: Path | None = None, explicit: bool = False) -> dict[str, Any]:
                 if k not in known:
                     log.warning("config: unknown key [%s] %s", key, k)
                 elif _valid(f"[{key}] ", k, v, known[k]):
-                    section[k] = os.path.expanduser(v) if k == "screens" else v
+                    section[k] = os.path.expanduser(v) if k in ("screens", "receive_dir") else v
             out[key] = section
         else:
             log.warning("config: unknown key %s", key)
