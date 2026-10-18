@@ -8,19 +8,23 @@ are coordinates in that layout's shared virtual space, so the two agents agree o
     receiver -> sender    give-back    {border, row}   pointer pushed back through the border: stop forwarding
     sender  -> receiver   release      {}              forwarding ended (hotkey, widget, error): the receiver is no longer receiving
 
+Every message carries ``v`` (the protocol version, absent = 1); a message with a newer ``v`` or an unknown ``kind`` is ignored, so two
+computers running different releases degrade instead of misbehaving.
+
 :class:`Handoff` is the pure state machine that turns local edge events and peer messages into those actions.
 """
 from __future__ import annotations
 
 import json
 import time
-from typing import Callable
+from collections.abc import Callable
 
 CH_CONTROL = 1  # link channel carrying these messages
+VERSION = 1  # bump on an incompatible change; messages from a newer version are ignored, unknown kinds always are
 
 
 def encode(kind: str, **fields) -> bytes:
-    return json.dumps({"kind": kind, **fields}, separators=(",", ":")).encode()
+    return json.dumps({"v": VERSION, "kind": kind, **fields}, separators=(",", ":")).encode()
 
 
 def decode(data: bytes) -> dict | None:
@@ -28,7 +32,10 @@ def decode(data: bytes) -> dict | None:
         msg = json.loads(data)
     except ValueError:
         return None
-    return msg if isinstance(msg, dict) and isinstance(msg.get("kind"), str) else None
+    if not (isinstance(msg, dict) and isinstance(msg.get("kind"), str)):
+        return None
+    version = msg.get("v", 1)  # peers from before the field existed speak version 1
+    return msg if isinstance(version, int) and version <= VERSION else None
 
 
 class Handoff:

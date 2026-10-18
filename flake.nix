@@ -3,19 +3,20 @@
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   outputs = { self, nixpkgs }:
     let
+      project = (builtins.fromTOML (builtins.readFile ./pyproject.toml)).project;
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAll = f: nixpkgs.lib.genAttrs systems (s: f nixpkgs.legacyPackages.${s});
     in {
       packages = forAll (pkgs: rec {
         default = pkgs.python3Packages.buildPythonApplication {
           pname = "openaten";
-          version = "0.1.0";
+          version = project.version;  # single source of truth: pyproject.toml
           pyproject = true;
           src = self;
           build-system = [ pkgs.python3Packages.setuptools ];
           dependencies = [ pkgs.python3Packages.pyusb pkgs.python3Packages.evdev ];
           makeWrapperArgs = [ "--prefix" "LD_LIBRARY_PATH" ":" (pkgs.lib.makeLibraryPath [ pkgs.libusb1 ]) ];
-          doCheck = false;
+          nativeCheckInputs = [ pkgs.python3Packages.pytestCheckHook ];
           meta.mainProgram = "openaten";
         };
         # Border strips (`openaten strip`): GTK4 + gtk4-layer-shell. gtk4-layer-shell must be preloaded before libwayland-client, so this

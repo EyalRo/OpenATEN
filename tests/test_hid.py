@@ -1,5 +1,5 @@
 from openaten import hid
-from openaten.hid import EV_KEY, EV_REL, EV_SYN, Keyboard, Mouse, Translator
+from openaten.hid import EV_KEY, EV_REL, EV_SYN, Keyboard, Translator
 
 
 def test_letters_and_digits_map_to_usages():

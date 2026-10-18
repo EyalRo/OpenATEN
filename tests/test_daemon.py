@@ -55,7 +55,7 @@ def make(tmp_path, ends=None, **kw):
         runners.append(r)
         return r
 
-    d = dm.Daemon(mk, lambda: list(ends), FakeEnd, port_of=lambda d: d.port, hotkey="ctrl+alt+k", log=lambda m: None, directory=tmp_path, **kw)
+    d = dm.Daemon(mk, lambda: list(ends), FakeEnd, port_of=lambda d: d.port, hotkey="ctrl+alt+k", directory=tmp_path, **kw)
     return d, runners, ends
 
 
@@ -186,7 +186,7 @@ def test_forwarding_start_and_stop_are_announced_to_the_peer(tmp_path):
     d.run_once()
     d.commands.put("off")
     d.run_once()
-    assert [m for _, m in links[0].messages] == [{"kind": "take-control", "border": None, "row": None}, {"kind": "release"}]
+    assert [m for _, m in links[0].messages] == [{"v": 1, "kind": "take-control", "border": None, "row": None}, {"v": 1, "kind": "release"}]
 
 
 def test_peer_take_control_then_strip_enter_after_leaving_sends_give_back(tmp_path):
@@ -198,7 +198,7 @@ def test_peer_take_control_then_strip_enter_after_leaving_sends_give_back(tmp_pa
     d.commands.put(("edge", "k", 6.0, True))
     d.run_once()
     assert d.snapshot()["receiving"] is False
-    assert links[0].messages[-1] == (1, {"kind": "give-back", "border": "k", "row": 6.0})
+    assert links[0].messages[-1] == (1, {"v": 1, "kind": "give-back", "border": "k", "row": 6.0})
 
 
 def test_peer_give_back_stops_forwarding(tmp_path):
@@ -218,5 +218,36 @@ def test_edge_command_over_the_socket(tmp_path):
         assert dm.request("edge", directory=tmp_path, border="k", row=3.0)["ok"] is True
         assert dm.request("edge", directory=tmp_path, border="k")["ok"] is False
         assert d.commands.get(timeout=2) == ("edge", "k", 3.0, True)
+    finally:
+        d._server.shutdown()
+
+
+def test_link_retry_backs_off_while_the_bridge_is_missing_and_resets_once_up(tmp_path):
+    ends: list = []
+    d, _, _ = make_linked(tmp_path)
+    d.find_ends = lambda: list(ends)
+    delays = []
+    for _ in range(8):
+        d._link_retry_at = 0.0  # make the next attempt due now
+        d._ensure_link()
+        delays.append(d._link_retry_delay)
+    assert delays == [4.0, 8.0, 16.0, 30.0, 30.0, 30.0, 30.0, 30.0]
+    ends.append(Dev("1"))
+    d._link_retry_at = 0.0
+    d._ensure_link()
+    assert d.link is not None and d._link_retry_delay == dm.LINK_RETRY_MIN
+
+
+def test_silent_control_client_times_out(tmp_path, monkeypatch):
+    import socket
+
+    monkeypatch.setattr(dm._Handler, "timeout", 0.2)
+    d, _, _ = make(tmp_path)
+    d.start_server()
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(3)
+            s.connect(str(d.dir / "ctl.sock"))
+            assert b"bad request" in s.recv(200)  # the handler gave up on the silent client instead of waiting forever
     finally:
         d._server.shutdown()

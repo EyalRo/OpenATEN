@@ -1,6 +1,8 @@
 import struct
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from openaten import protocol as pr
 
@@ -51,3 +53,44 @@ def test_hid_reports():
     assert pr.mouse_report(0, 5, 0, 0, 0) == bytes([1, 0, 0, 5, 0])  # [id, buttons, wheel, dx, dy]
     assert pr.key_report(0, 0x04) == bytes([2, 0, 4, 0, 0, 0, 0, 0])  # [id, modifiers, key1..key6]
     assert len(pr.key_report(2, 1, 2, 3, 4, 5, 6, 7)) == 8
+
+
+def test_coalesce_sums_motion_within_a_button_state_and_splits_overflow():
+    m = pr.mouse_report
+    assert pr.coalesce_mouse([m(0, 5, 1), m(0, -2, 3), m(0, 1, 0)]) == [m(0, 4, 4)]
+    assert pr.coalesce_mouse([m(0, 100, 0), m(0, 100, 0)]) == [m(0, 127, 0), m(0, 73, 0)]
+    assert pr.coalesce_mouse([m(0, 0, 0, wheel=1), m(0, 0, 0, wheel=1)]) == [m(0, 0, 0, wheel=2)]
+
+
+def test_coalesce_never_merges_across_a_button_change_or_other_report_kinds():
+    m, k = pr.mouse_report, pr.key_report
+    seq = [m(0, 3, 0), m(1, 3, 0), m(1, 2, 0), k(0, 4), m(1, 1, 0), m(0, 1, 0)]
+    assert pr.coalesce_mouse(seq) == [m(0, 3, 0), m(1, 5, 0), k(0, 4), m(1, 1, 0), m(0, 1, 0)]
+    assert pr.coalesce_mouse([k(0, 4), k()]) == [k(0, 4), k()]  # key presses are never dropped or merged
+    assert pr.coalesce_mouse([]) == []
+
+
+@given(st.lists(st.tuples(st.integers(0, 3), st.integers(-127, 127), st.integers(-127, 127), st.integers(-127, 127)), max_size=30))
+def test_coalesce_preserves_total_motion_and_button_sequence(raw):
+    reports = [pr.mouse_report(b, dx, dy, w) for b, dx, dy, w in raw]
+    out = pr.coalesce_mouse(reports)
+
+    def totals(rs):
+        acc = {}
+        for r in rs:
+            t = acc.setdefault(r[1], [0, 0, 0])
+            for i, v in enumerate((r[2], r[3], r[4])):
+                t[i] += v - 256 if v > 127 else v
+        return acc
+
+    assert len(out) <= len(reports) or not reports
+    assert totals(out) == totals(reports)
+    assert [r[1] for r in dedup(out)] == [r[1] for r in dedup(reports)]  # same button-state transitions
+
+
+def dedup(rs):
+    out = []
+    for r in rs:
+        if not out or out[-1][1] != r[1]:
+            out.append(r)
+    return out

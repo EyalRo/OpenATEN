@@ -52,7 +52,7 @@ class Edge:
     hi: float
     far: str  # name of the screen on the other side
 
-    def mirror(self, far: str) -> "Edge":
+    def mirror(self, far: str) -> Edge:
         return Edge(self.axis, -self.sign, self.line, self.lo, self.hi, far)
 
 

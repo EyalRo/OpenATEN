@@ -16,8 +16,11 @@ import threading
 import time
 import zlib
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional, Protocol
+from typing import Protocol
+
+from . import protocol as pr
 
 SLOT = 2048  # wire lengths are multiples of this; also the default frame size
 MAGIC = b"OATN"
@@ -79,7 +82,7 @@ class Frame:
         return (hdr + struct.pack("<I", crc) + self.payload).ljust(length, b"\0")
 
     @staticmethod
-    def decode(data: bytes) -> "Frame":
+    def decode(data: bytes) -> Frame:
         if len(data) < _OVERHEAD:
             raise ValueError("short frame")
         magic, ver, kind, flags, seq, ack, next_len, channel, msg_id, offset, total, plen = _HDR.unpack_from(data)
@@ -137,8 +140,8 @@ class LinkSession:
         self._asm: dict[tuple[int, int], bytearray] = {}
         self._peer_busy = False
         self._stop = threading.Event()
-        self._thread: Optional[threading.Thread] = None
-        self.stats = dict(frames_tx=0, frames_rx=0, resyncs=0, bytes_tx=0, bytes_rx=0, bad_frames=0, hid_sent=0, hid_errors=0)
+        self._thread: threading.Thread | None = None
+        self.stats = dict(frames_tx=0, frames_rx=0, resyncs=0, bytes_tx=0, bytes_rx=0, bad_frames=0, hid_sent=0, hid_errors=0, hid_coalesced=0)
 
     # ---- public API ------------------------------------------------------------------
     def start(self) -> None:
@@ -174,7 +177,7 @@ class LinkSession:
         return mid
 
     # ---- frame construction -----------------------------------------------------------
-    def _build(self) -> tuple[Frame, int, Optional[_Chunk]]:
+    def _build(self) -> tuple[Frame, int, _Chunk | None]:
         """Frame to send now (exactly ``_tx_len`` bytes on the wire) and the chunk it carries, if any."""
         chunk = self._chunks[0] if self._chunks else None
         carried = None
@@ -196,11 +199,11 @@ class LinkSession:
         self.stats["frames_tx"] += 1
         self.stats["bytes_tx"] += len(frame.payload)
 
-    def _give_back(self, carried: Optional[_Chunk]) -> None:
+    def _give_back(self, carried: _Chunk | None) -> None:
         if carried is not None:
             self._chunks.appendleft(carried)
 
-    def _accept(self, data: bytes) -> Optional[Frame]:
+    def _accept(self, data: bytes) -> Frame | None:
         try:
             f = Frame.decode(data)
         except ValueError:
@@ -238,6 +241,11 @@ class LinkSession:
     def _flush_hid(self) -> None:
         """Inject queued HID reports. They are separate commands and may run between any two exchanges."""
         hid = getattr(self.t, "hid", None)
+        if len(self._hid) > 1:  # a backlog from a fast mouse: send the same motion in fewer commands
+            pending = [self._hid.popleft() for _ in range(len(self._hid))]  # only this thread pops; others append
+            merged = pr.coalesce_mouse(pending)
+            self.stats["hid_coalesced"] += len(pending) - len(merged)
+            self._hid.extendleft(reversed(merged))  # back in front of anything queued meanwhile
         while self._hid and hid is not None:
             report = self._hid.popleft()
             try:
@@ -259,7 +267,7 @@ class LinkSession:
         self._rx_len = self._tx_len = SLOT
         self.t.reset()
 
-    def _recv_frame(self) -> Optional[Frame]:
+    def _recv_frame(self) -> Frame | None:
         try:
             return self._accept(self.t.recv(self._rx_len, timeout=self.io_timeout))
         except TransportStall:

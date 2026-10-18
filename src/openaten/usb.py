@@ -120,6 +120,7 @@ class BridgeEnd:
                         self.cmd(pr.cdb_hid(5), data_out=bytes(5), timeout=timeout, cbw_timeout=timeout)
                     except usb.core.USBError:
                         self.reset()
+        raise AssertionError("unreachable: the last attempt returns or raises")
 
     def state(self) -> int:
         return self.simple(pr.cdb_state(), data_in=1)[1][0]

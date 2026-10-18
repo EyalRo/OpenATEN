@@ -1,0 +1,24 @@
+# User service for the OpenATEN daemon. Install with:
+#   install -Dm0644 contrib/systemd/openaten.service ~/.config/systemd/user/openaten.service
+#   systemctl --user daemon-reload && systemctl --user enable --now openaten
+# Run `systemctl --user edit openaten` to set the role (one computer master, the other slave) and other flags, e.g.:
+#   [Service]
+#   ExecStart=
+#   ExecStart=%h/.local/bin/openaten daemon --role master
+# Logs: `journalctl --user -u openaten` (set OPENATEN_LOG=DEBUG in the unit's Environment= for more detail).
+[Unit]
+Description=OpenATEN daemon (keyboard/mouse hand-off over the ATEN bridge)
+Documentation=https://github.com/EyalRo/OpenATEN/blob/main/docs/setup.md
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/openaten daemon
+Environment=OPENATEN_LOG=INFO
+Restart=on-failure
+RestartSec=3
+# Not sandboxed further on purpose: the daemon writes its status file and socket under $XDG_RUNTIME_DIR and needs /dev/input and USB.
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

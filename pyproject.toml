@@ -9,11 +9,22 @@ description = "Open tooling for the host-to-host bridge in ATEN US3342-class USB
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Topic :: System :: Hardware",
+]
 dependencies = ["pyusb>=1.2", "tomli>=2; python_version < \"3.11\""]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "pytest-cov", "hypothesis", "ruff", "mypy"]
 forward = ["evdev"]
+
+[project.urls]
+Homepage = "https://github.com/EyalRo/OpenATEN"
+Issues = "https://github.com/EyalRo/OpenATEN/issues"
+Changelog = "https://github.com/EyalRo/OpenATEN/blob/main/CHANGELOG.md"
 
 [project.scripts]
 openaten = "openaten.cli:main"
@@ -24,3 +35,25 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]
+
+[tool.ruff]
+line-length = 160
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# E501: long lines are the house style (formatter not enforced); B905/B023/E731: zip lengths are equal by construction, closures are intentional
+ignore = ["E501", "B905", "B023", "E731"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["openaten"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 60  # hardware-bound modules (usb, selftest, strip) are mostly untestable in CI; raise as coverage grows
