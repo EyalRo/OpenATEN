@@ -148,6 +148,17 @@ class LinkSession:
     def idle(self) -> bool:
         return not self._chunks and not self._hid and not self._peer_busy
 
+    def flush(self, timeout: float = 10.0) -> bool:
+        """Wait until every queued message chunk has been sent (the peer has taken the last one). False on timeout or stop.
+
+        ``stop()`` abandons whatever is still queued, so call this first when the peer must receive everything.
+        """
+        deadline = time.monotonic() + timeout
+        while self._chunks:
+            if self._stop.wait(0.005) or time.monotonic() >= deadline:
+                return False
+        return True
+
     def inject_hid(self, report: bytes) -> None:
         """Queue a mouse (5 B) or keyboard (8 B) report for injection on the peer; sent between exchanges."""
         self._hid.append(bytes(report))

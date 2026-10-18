@@ -87,6 +87,7 @@ def cmd_link_peer(args) -> int:
     link.send_message(1, small)
     link.send_message(2, big)
     ok = done.wait(args.timeout)
+    link.flush()  # finishing our receive first must not abandon our own last chunk: the peer is still waiting for it
     dt = time.time() - t0
     if not link.stop():
         bridge_ends.STUCK_THREADS.append(True)
