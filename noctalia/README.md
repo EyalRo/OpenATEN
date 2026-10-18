@@ -8,3 +8,7 @@ Bar widget for [Noctalia](https://noctalia.dev) v5: shows bridge/forwarding stat
 3. Add `stags/openaten:widget` to a bar.
 
 Colours: dim = no daemon or no bridge, normal = connected, primary = forwarding, red = error.
+
+Hover for details: state, bridge (and the USB port of the claimed end), role, number of input devices, hotkey, edge hand-off state, active transfers and any error. Rows the daemon does not report (older versions) are left out.
+
+Setting **openaten command** (widget settings): path to the `openaten` binary used for the click toggle; default `~/.local/bin/openaten`.
