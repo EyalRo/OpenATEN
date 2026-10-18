@@ -10,6 +10,9 @@ pre-commit install            # optional: runs ruff on commit
 ruff check . && mypy && pytest
 ```
 
+Tests that need a real switch are marked `hardware` and skipped by default; run them with `pytest -m hardware` (both upstream ports connected,
+see [docs/hardware.md](docs/hardware.md) for the hazards).
+
 CI runs the same checks on Python 3.10-3.12. The tests use a fake transport that models the firmware's turn-taking, so they need no hardware.
 
 ## Layout

@@ -34,6 +34,8 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not hardware'"  # real-switch tests only run on request: pytest -m hardware
+markers = ["hardware: needs an ATEN switch with both upstream ports connected to this machine (see docs/hardware.md)"]
 pythonpath = ["src", "tests"]
 
 [tool.ruff]
