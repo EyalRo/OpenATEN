@@ -251,3 +251,37 @@ def test_silent_control_client_times_out(tmp_path, monkeypatch):
             assert b"bad request" in s.recv(200)  # the handler gave up on the silent client instead of waiting forever
     finally:
         d._server.shutdown()
+
+
+def test_hotplug_add_skips_the_retry_backoff_and_reconnects(tmp_path):
+    ends: list = []
+    sources: list = []
+
+    class Source:
+        def __init__(self, callback):
+            self.callback, self.stopped = callback, False
+            sources.append(self)
+
+        def stop(self):
+            self.stopped = True
+
+    d, _, links = make_linked(tmp_path)
+    d.find_ends = lambda: list(ends)
+    d.hotplug = Source
+    d.start_server()
+    d._hotplug_handle = d.hotplug(lambda action: d.commands.put(("hotplug", action)))
+    try:
+        d._ensure_link()
+        d._ensure_link()  # still inside the backoff window: no second attempt
+        assert d.link is None and d._link_retry_delay > dm.LINK_RETRY_MIN
+        ends.append(Dev("1"))
+        sources[0].callback("add")
+        d.run_once(0.01)
+        assert d.link is not None and links and links[0].started  # reconnected at once
+        sources[0].callback("remove")
+        d.run_once(0.01)  # processes the event (marks the session dead) ...
+        d.run_once(0.01)  # ... and the next loop tears it down
+        assert links[0].stopped
+        assert len(links) >= 2 and d.link is links[-1]  # and rebuilt (the fake bridge is still listed)
+    finally:
+        d._server.shutdown()

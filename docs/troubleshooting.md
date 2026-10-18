@@ -9,7 +9,7 @@ The firmware rules behind most of these are explained in [hardware.md](hardware.
 | Permission denied opening the device | The `uaccess` rule is not applied | Rule must be numbered below 73; re-plug the switch after installing it |
 | `openaten forward` finds no devices | No read access to `/dev/input` | Join the `input` group or run with equivalent access |
 | Commands hang or fail repeatedly, processes stuck in `usb_stor_disconnect` | The kernel `usb-storage` driver is probing the bridge and wedged the firmware | Power-cycle the switch (power and both USB-C cables); add `usb-storage.quirks=05e3:0627:i` to the kernel command line |
-| `link not up (retrying)` in the daemon log | No bridge end yet, or the firmware refused the first command | Wait: retries back off from 2 s to 30 s. If it persists, check `openaten list`, then power-cycle |
+| `link not up (retrying)` in the daemon log | No bridge end yet, or the firmware refused the first command | Wait: retries back off from 2 s to 30 s, but a bridge hotplug event (switch re-enumerates, cable re-plugged) triggers an immediate retry. If it persists, check `openaten list`, then power-cycle |
 | Injected keys/mouse stop working on the other computer | Nothing polls that end's HID interface (e.g. a test tool left `usbhid` detached) | Re-attach the `usbhid` driver or re-plug; `openaten hid` restores it itself |
 | `forwarding` turns itself off with "injection failed" | Bridge unplugged or the firmware refused the report | Check the log line for the cause; hand control back with the hotkey, then retry |
 | First `state`/`inquiry` after a link session is refused | Known firmware quirk (hardware.md, point 9) | Handled automatically by a reset and retry; no action needed |

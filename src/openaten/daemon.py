@@ -108,12 +108,15 @@ class Daemon:
         directory: Path | None = None,
         role: str | None = None,
         make_link: Callable[..., object] | None = None,
+        hotplug: Callable[[Callable[[str], None]], Any] | None = None,
     ):
         self.dir = directory or runtime_dir()
         self.make_runner, self.find_ends, self.open_end = make_runner, find_ends, open_end
         self.port, self.port_of, self.hotkey = port, port_of, hotkey
         self.commands: queue.Queue = queue.Queue()
         self.role, self.make_link = role, make_link
+        self.hotplug = hotplug  # starts a bridge add/remove event source: hotplug(callback) -> handle with stop() (or None)
+        self._hotplug_handle: Any = None
         self.link: Any = None  # persistent link session (role mode): HID reports and hand-off messages ride on it
         self._link_error: str | None = None
         self._link_retry_at = 0.0
@@ -204,6 +207,15 @@ class Daemon:
                 log.warning("link not up (retrying): %s", e)
             self._link_error = msg
 
+    def _on_hotplug(self, action: str) -> None:
+        """The bridge appeared or disappeared: reconnect now instead of waiting out the retry backoff."""
+        log.info("bridge %s", action)
+        self._link_retry_at, self._link_retry_delay = 0.0, LINK_RETRY_MIN
+        if action == "remove" and self.link is not None and self._link_error is None:
+            self._link_error = "link: bridge removed"  # the session is rebuilt on the next loop (failing until the add event)
+        if action == "add":
+            self._ensure_link()
+
     def _drop_link(self) -> None:
         link, self.link = self.link, None
         if link is not None:
@@ -288,6 +300,8 @@ class Daemon:
                     self.handoff.edge(cmd[1], cmd[2], cmd[3])
                 elif cmd[0] == "peer":
                     self.handoff.message(cmd[1])
+                elif cmd[0] == "hotplug":
+                    self._on_hotplug(cmd[1])
             elif cmd == "quit":
                 self.stop_flag.set()
             elif cmd == "toggle":
@@ -316,12 +330,16 @@ class Daemon:
 
     def run(self) -> int:
         self.start_server()
+        if self.hotplug is not None:
+            self._hotplug_handle = self.hotplug(lambda action: self.commands.put(("hotplug", action)))
         self._publish(force=True)
         log.info("openaten daemon running; status: %s, control: %s", self.dir / "status.json", self.dir / "ctl.sock")
         try:
             while not self.stop_flag.is_set():
                 self.run_once()
         finally:
+            if self._hotplug_handle is not None:
+                self._hotplug_handle.stop()
             if self.runner is not None:
                 self.runner.close()
             self._drop_link()

@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## Unreleased
 
 ### Added
+- Daemon reconnects immediately when the bridge re-enumerates (kernel uevent netlink listener, `openaten.hotplug`); falls back to polling where unavailable.
 - `hardware` pytest marker (`pytest -m hardware`) running the list/state/loopback/link/hid self-tests against a real switch.
 - Optional `config.toml` for command defaults (`--config`, `contrib/config.example.toml`).
 - CI (ruff, mypy, pytest on Python 3.10-3.12), pre-commit, Dependabot, issue/PR templates, SECURITY and CONTRIBUTING.

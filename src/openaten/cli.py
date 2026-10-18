@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import config, ends, selftest
+from . import config, ends, hotplug, selftest
 from . import log as logsetup
 from .errors import TransportError
 from .forward import DEFAULT_HOTKEY
@@ -109,6 +109,7 @@ def cmd_daemon(args) -> int:
         port_of=port_path,
         hotkey=args.hotkey,
         role=args.role,
+        hotplug=hotplug.start,
         make_link=lambda end, master, on_message, on_error: LinkSession(UsbTransport(end), master, on_message, poll_idle=0.02, on_error=on_error),
     )
     import signal
