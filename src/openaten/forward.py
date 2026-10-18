@@ -310,13 +310,16 @@ class EvdevRunner:
         self.fwd.request(False)
         deadline = time.monotonic() + 3.0
         while self.fwd.active and time.monotonic() < deadline:
+            # wake as soon as a device has events (a key release) instead of sleeping blindly; 0.02 s bounds the recheck
+            ready = select.select(list(self._by_fd), [], [], 0.02)[0] if self._by_fd else []
+            if not ready and not self._by_fd:
+                time.sleep(0.02)
             for fd in list(self._by_fd):
                 try:
                     list(self._by_fd[fd].read())
                 except (OSError, BlockingIOError):
                     pass
             self.fwd.handle([])
-            time.sleep(0.02)
         self.fwd.stop()
 
 
