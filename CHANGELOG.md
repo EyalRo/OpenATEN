@@ -11,7 +11,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Control socket: request timeout and peer-uid check.
 - Link restart in the daemon backs off from 2 s to 30 s.
 
-- CodeQL and dependency-review workflows; GitHub Actions pinned by commit SHA.
+- CodeQL workflow; GitHub Actions pinned by commit SHA. (A dependency-review workflow needs the repository's Dependency graph enabled; add `actions/dependency-review-action` on `pull_request` once it is.)
 - systemd user unit (`contrib/systemd/openaten.service`) and docs.
 - Property-based tests (hypothesis) for the link frame format and the hand-off state machine.
 
