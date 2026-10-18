@@ -141,7 +141,7 @@ openaten daemon --role slave --receive-dir ~/Downloads/OpenATEN   # receiving co
 openaten send photo.jpg report.pdf                                 # on the other computer, through its running daemon
 openaten ctl status                                                # "transfers": id, name, direction, size, done, state, error
 ```
-`openaten send` prints a transfer id; the control-socket command `cancel {id}` cancels it. Without `--receive-dir` the receiver rejects offers with "receiving is not enabled".
+`openaten send` takes files or directories (a directory is sent as one transfer per regular file, symlinks skipped, recreated under a fresh `name`/`name (1)` directory on the receiver, never merged) and prints a transfer id (a batch id for a directory); the control-socket command `cancel {id}` cancels it. Without `--receive-dir` the receiver rejects offers with "receiving is not enabled".
 
 ## Protocol (link channel 3)
 ```

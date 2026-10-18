@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format follows [Kee
 ## Unreleased
 
 ### Added
+- `openaten.warp.Warp` extension point for exact pointer placement on hand-off (the daemon calls it after `take-control` and on `give-back`; only a null backend exists yet), `EdgeSwitch.entry_point`.
+- Docs: roles (master/slave vs the firmware's H/S), other-distribution udev/kernel-quirk steps, pipx install.
+- `openaten send DIR` sends a directory tree (one transfer per regular file, symlinks skipped, never merged into an existing directory); status shows a summary per directory.
+- Edge hand-off: `local_outputs = "niri"` reads this computer's screens from `niri msg --json outputs`; touchpads now drive the pointer tracker in motion mode (`touchpad_scale`). Not yet run against a real niri.
 - NixOS module (`nixosModules.default`, `services.openaten`): package, udev rule, kernel quirk, `input` group and a systemd user service; evaluated by `nix flake check`.
 - Release workflow publishes to PyPI via trusted publishing once `PUBLISH_TO_PYPI` is set (skipped until then); release steps in CONTRIBUTING.
 - Clipboard sharing (`daemon --clipboard`; text and PNG, wl-clipboard/xclip) and file transfer (`openaten send`, `daemon --receive-dir`) over the link, opt-in; see docs/applications.md. `status.json` gains `clipboard` and `transfers`. Not yet verified on hardware.

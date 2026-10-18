@@ -110,9 +110,13 @@ class Forwarder:
 
     def handle(self, events: Iterable[tuple[int, int, int]], source: object = None, touchpad: bool = False) -> None:
         """Process one batch from one device. ``touchpad`` marks absolute pointing devices, which keep per-device state."""
-        if self.edges is not None and not self.desired and not self.active and not touchpad and self.edges.local_motion(events):
-            self.request(True)  # the pointer pushed through the border
-            events = [e for e in events if e[0] != H.EV_REL]  # the push itself must not move the other pointer
+        if self.edges is not None and not self.desired and not self.active:
+            if not touchpad and self.edges.local_motion(events):
+                self.request(True)  # the pointer pushed through the border
+                events = [e for e in events if e[0] != H.EV_REL]  # the push itself must not move the other pointer
+            elif touchpad and self.edges.local_touchpad(events, source):
+                self.request(True)
+                events = []  # the touch that pushed through is consumed; forwarding starts with the next touch
         forward: list[tuple[int, int, int]] = []
         for etype, code, value in events:
             if etype == H.EV_KEY and value in (0, 1):

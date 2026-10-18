@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -147,6 +148,7 @@ class EdgeSwitch:
         remote_scale: float = 1.0,
         push: float = 40.0,
         source: str = "motion",
+        touchpad_scale: float = 1.0,
     ):
         if source not in ("motion", "strip"):
             raise ValueError("source must be 'motion' (dead-reckoned from mouse motion) or 'strip' (reported by `openaten strip`)")
@@ -163,6 +165,8 @@ class EdgeSwitch:
         self.keys = ["~".join(sorted((f"{local_host}:{b.far}", f"{host_of[a.far]}:{a.far}"))) for a, b in self.pairs]
         self.local = PointerTracker(local, local_scale, [p[0] for p in self.pairs], push)
         self.remote = PointerTracker(remote, remote_scale, [p[1] for p in self.pairs], push)
+        self.touchpad_scale = touchpad_scale  # logical pixels per count of the touchpad's translated motion (libinput accelerates touchpads: tune it)
+        self._pads: dict[object, H.Touchpad] = {}  # shadow translators: what each touchpad would forward, used only to track the local pointer
         self._exit: tuple[int, float] | None = None  # border index and position along it where we left
 
     @property
@@ -182,6 +186,24 @@ class EdgeSwitch:
                     return True
         return False
 
+    def local_touchpad(self, events, source: object = None) -> bool:
+        """Like :meth:`local_motion` for a touchpad (absolute events): its translated motion drives the local pointer tracker."""
+        if self.source != "motion":
+            return False
+        pad = self._pads.setdefault(source, H.Touchpad())
+        ratio = self.touchpad_scale / self.local.scale
+        for report in pad.feed(events):
+            if len(report) == 5 and report[0] == 1:
+                dx, dy = (b - 256 if b > 127 else b for b in report[3:5])
+                if dx or dy:
+                    i = self.local.move(dx * ratio, dy * ratio)
+                    if i is not None:
+                        edge = self.pairs[i][0]
+                        self._exit = (i, self.local.lo[1 - edge.axis])
+                        self._pads.clear()
+                        return True
+        return False
+
     def border_pushed(self, key: str, row: float) -> bool:
         """An external source (the strip) reports the pointer at ``row`` on border ``key``. False if the key is unknown."""
         if key not in self.keys:
@@ -190,9 +212,22 @@ class EdgeSwitch:
         self._exit = (i, row)
         return True
 
+    def entry_point(self, key: str, row: float) -> tuple[float, float] | None:
+        """Where to put this computer's own pointer for a crossing of border ``key`` at ``row``: the last pixel inside the border, or None.
+
+        ``row`` is the coordinate along the border in the shared space (the same number both computers use), clamped to the shared segment.
+        """
+        if key not in self.keys:
+            return None
+        edge = self.pairs[self.keys.index(key)][0]  # this computer's side of the border
+        inside = edge.line - 1 if edge.sign > 0 else edge.line  # the border line itself belongs to the far side when leaving to the right/bottom
+        along = min(max(row, edge.lo), edge.hi)
+        return (inside, along) if edge.axis == 0 else (along, inside)
+
     def entering(self) -> list[bytes]:
         """Called when forwarding starts: reports that put the other computer's pointer at the border we crossed (none after a hotkey)."""
         crossing, self._exit = self._exit, None
+        self._pads.clear()
         self.remote.reset()
         self.local.clear_push()
         if crossing is None:
@@ -214,6 +249,7 @@ class EdgeSwitch:
     def leaving(self) -> None:
         """Called when forwarding stops. The local pointer stayed frozen where it was, so its position is still valid."""
         self._exit = None
+        self._pads.clear()
         self.local.clear_push()
 
     def remote_report(self, report: bytes) -> bool:
@@ -230,8 +266,12 @@ def default_path() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "openaten" / "screens.toml"
 
 
-def load(path: Path, local: str | None = None) -> EdgeSwitch:
-    """Build an :class:`EdgeSwitch` from a TOML file (see docs/setup.md). ``local`` overrides the file's ``local`` key and the hostname."""
+def load(path: Path, local: str | None = None, outputs: Callable[[str], list[Screen] | None] | None = None) -> EdgeSwitch:
+    """Build an :class:`EdgeSwitch` from a TOML file (see docs/setup.md). ``local`` overrides the file's ``local`` key and the hostname.
+
+    With ``local_outputs = "niri"`` in the file, this computer's screens come from the compositor (``outputs(host)``, default
+    :func:`openaten.outputs.niri_outputs`) instead of the file's ``[[screen]]`` entries for this host; if they cannot be read the file's are used.
+    """
     try:
         import tomllib
     except ModuleNotFoundError:  # Python 3.10
@@ -245,4 +285,24 @@ def load(path: Path, local: str | None = None) -> EdgeSwitch:
         screens = [Screen(str(s["name"]), str(s["host"]), s["x"], s["y"], s["width"], s["height"]) for s in cfg.get("screen", [])]
     except KeyError as e:
         raise ValueError(f"{path}: every [[screen]] needs name, host, x, y, width and height (missing {e.args[0]})") from None
-    return EdgeSwitch(screens, host, float(cfg.get("local_scale", 1.0)), float(cfg.get("remote_scale", 1.0)), float(cfg.get("push", 40.0)), str(cfg.get("source", "motion")))
+    source_of_local = cfg.get("local_outputs")
+    if source_of_local is not None:
+        if source_of_local != "niri":
+            raise ValueError(f"{path}: local_outputs must be \"niri\" (got {source_of_local!r})")
+        read = outputs
+        if read is None:
+            from .outputs import niri_outputs
+
+            read = niri_outputs
+        found = read(host)
+        if found:
+            screens = [s for s in screens if s.host != host] + found
+    return EdgeSwitch(
+        screens,
+        host,
+        float(cfg.get("local_scale", 1.0)),
+        float(cfg.get("remote_scale", 1.0)),
+        float(cfg.get("push", 40.0)),
+        str(cfg.get("source", "motion")),
+        float(cfg.get("touchpad_scale", 1.0)),
+    )
