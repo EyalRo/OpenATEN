@@ -16,6 +16,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from . import hid as H
 
@@ -168,6 +169,8 @@ class EdgeSwitch:
         self.touchpad_scale = touchpad_scale  # logical pixels per count of the touchpad's translated motion (libinput accelerates touchpads: tune it)
         self._pads: dict[object, H.Touchpad] = {}  # shadow translators: what each touchpad would forward, used only to track the local pointer
         self._exit: tuple[int, float] | None = None  # border index and position along it where we left
+        self._back: tuple[int, float] | None = None  # border index and position along it where the other pointer pushed back
+        self.warp: Any = None  # a openaten.warp.Warp backend: puts this computer's pointer where the other one came back (None: it stays put)
 
     @property
     def state(self) -> str:
@@ -247,10 +250,19 @@ class EdgeSwitch:
         return slam + go
 
     def leaving(self) -> None:
-        """Called when forwarding stops. The local pointer stayed frozen where it was, so its position is still valid."""
+        """Called when forwarding stops. The local pointer stayed frozen where it was, so its position is still valid.
+
+        When the other pointer pushed back through the border and a warp backend is set, this computer's pointer is placed where it came back.
+        """
+        back, self._back = self._back, None
         self._exit = None
         self._pads.clear()
         self.local.clear_push()
+        if back is not None and self.warp is not None:
+            i, along = back
+            point = self.entry_point(self.keys[i], along)
+            if point is not None and self.warp.place(*point):
+                self.local.set(list(point))  # the pointer is now known exactly: no recalibration needed
 
     def remote_report(self, report: bytes) -> bool:
         """Feed a mouse report just sent to the other computer. True when its pointer pushed back through the border."""
@@ -258,7 +270,11 @@ class EdgeSwitch:
             return False  # the other agent reports it: see control.Handoff
         if len(report) == 5 and report[0] == 1:
             dx, dy = (b - 256 if b > 127 else b for b in report[3:5])
-            return self.remote.move(dx, dy) is not None
+            i = self.remote.move(dx, dy)
+            if i is not None:
+                edge = self.pairs[i][1]
+                self._back = (i, self.remote.lo[1 - edge.axis])
+                return True
         return False
 
 

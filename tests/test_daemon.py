@@ -447,3 +447,12 @@ def test_a_hostile_file_message_cannot_crash_the_daemon(tmp_path):
     d.run_once()
     d.run_once()
     assert not d.stop_flag.is_set()
+
+
+def test_status_reports_the_warp_backend_and_uinput_access(tmp_path, monkeypatch):
+    monkeypatch.setattr(dm, "uinput_state", lambda path="/dev/uinput": "denied")
+    d, _, _ = make(tmp_path)
+    d.dir.mkdir(exist_ok=True)
+    d.run_once()
+    st = d.snapshot()
+    assert st["warp"] == "none" and st["uinput"] == "denied"

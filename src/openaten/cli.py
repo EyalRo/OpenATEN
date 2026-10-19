@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import clipboard, config, ends, hotplug, selftest
+from . import clipboard, config, ends, hotplug, selftest, warp
 from . import log as logsetup
 from .clipboard import ClipboardSync
 from .errors import TransportError
@@ -126,6 +126,9 @@ def cmd_daemon(args) -> int:
     from .forward import EvdevRunner
 
     sw = _load_edges(args)
+    backend = warp.make(args.warp, sw.local.box if sw is not None else None)
+    if sw is not None:
+        sw.warp = backend
     d = dm.Daemon(
         lambda send: EvdevRunner(send, args.hotkey, max_active=args.max_active or None, edges=sw),
         find_ends,
@@ -135,6 +138,7 @@ def cmd_daemon(args) -> int:
         hotkey=args.hotkey,
         role=args.role,
         hotplug=hotplug.start,
+        warp=backend,
         make_clipboard=(lambda send: _make_clipboard(send)) if args.clipboard else None,
         make_transfers=lambda send: TransferManager(send, Path(args.receive_dir).expanduser() if args.receive_dir else None),
         make_link=lambda end, master, on_message, on_error: LinkSession(UsbTransport(end), master, on_message, poll_idle=0.02, on_error=on_error),
@@ -201,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     dm_.add_argument("--max-active", type=float, default=0, help="safety: return control after this many seconds (0 = never)")
     dm_.add_argument("--role", choices=["master", "slave"], help="keep a link to the other computer's agent (run master on one computer, slave on the other); needed for the strip's exact hand-off")
     dm_.add_argument("--screens", help="screen layout TOML for edge hand-off (default: ~/.config/openaten/screens.toml if it exists)")
+    dm_.add_argument("--warp", choices=["none", "uinput"], default="none", help="place this computer's pointer exactly where the other one came back (uinput needs write access to /dev/uinput; see docs/setup.md)")
     dm_.add_argument("--clipboard", action=argparse.BooleanOptionalAction, default=True, help="share the clipboard (text, PNG) with the other computer (needs --role; on by default, --no-clipboard turns it off)")
     dm_.add_argument("--receive-dir", default="~/Downloads", help="accept files sent with `openaten send` on the other computer into this directory (default: ~/Downloads)")
     dm_.set_defaults(fn=cmd_daemon)

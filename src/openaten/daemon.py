@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from . import appmsg, control
-from .warp import NullWarp, Warp
+from .warp import NullWarp, Warp, uinput_state
 
 log = logging.getLogger(__name__)
 
@@ -346,6 +346,8 @@ class Daemon:
             "role": self.role,
             "receiving": self.handoff.receiving,
             "clipboard": self.clipboard is not None,
+            "warp": getattr(self.warp, "name", "none"),
+            "uinput": uinput_state(),
             "transfers": self.transfers.status() if self.transfers is not None else [],
             "error": r.get("error") or self.error or self._link_error,
         }
