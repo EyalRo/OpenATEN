@@ -190,6 +190,26 @@ every command line. See `contrib/config.example.toml` for the keys: `log_level` 
 `OPENATEN_LOG` (log level only) > file > built-in default. Unknown keys and bad values are skipped with a WARNING; a missing default file is fine,
 but a file named with `--config` must exist and parse. The systemd unit's `ExecStart` can then stay `openaten daemon`.
 
+## Pointer warp (exact return placement, optional)
+
+niri cannot move a pointer from outside, so after a hand-off this computer's pointer stays where it left and reappears there when control comes back.
+With `--warp uinput` (or `warp = "uinput"` in `[daemon]` of `config.toml`) the daemon creates a virtual absolute pointer and, when the other
+computer's pointer pushes back through the border, places this computer's pointer at the row where it came back. It is off by default because it
+needs write access to `/dev/uinput`, which a normal user does not have:
+
+```sh
+ls -l /dev/uinput                                    # crw------- nobody nogroup: not writable by you
+sudo setfacl -m u:$USER:rw /dev/uinput               # gives only your user access; lasts until the device node is recreated (reboot)
+```
+
+The daemon status file (`openaten ctl status`) reports `warp` and `uinput: ok | denied | missing`. If the permission is missing the daemon logs a WARNING and keeps the
+approximate behaviour. For a permanent setup use a udev rule that tags `/dev/uinput` for your user (`TAG+="uaccess"` or a group you belong to) or, on NixOS,
+`hardware.uinput.enable = true` plus membership of its group. Anything that can write `/dev/uinput` can inject input events, so grant it only to users you trust.
+
+With a single local output the virtual pointer covers exactly that output. With several outputs the compositor decides how an absolute device maps onto
+them; the bounding box of the local screens is assumed, and that has not been verified. In `motion` mode the warp also marks the local pointer as
+known, so no recalibration push is needed after a return.
+
 ## Clipboard and file transfer
 
 Both are opt-in and need `--role` on both computers; details in [applications.md](applications.md).

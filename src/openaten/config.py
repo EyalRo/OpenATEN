@@ -8,6 +8,7 @@
     port = "1.2"
     max_active = 0
     screens = "~/.config/openaten/screens.toml"
+    warp = "none"                         # "uinput": place the pointer exactly where the other one came back (needs /dev/uinput access)
     clipboard = true                      # share the clipboard with the other computer (text and PNG images)
     receive_dir = "~/Downloads/OpenATEN"  # accept files sent from the other computer into this directory
 """
@@ -32,6 +33,7 @@ COMMAND_KEYS: dict[str, dict[str, tuple[type, ...]]] = {
         "screens": (str,),
         "role": (str,),
         "clipboard": (bool,),
+        "warp": (str,),
         "receive_dir": (str,),
     },
     "strip": {"screens": (str,)},

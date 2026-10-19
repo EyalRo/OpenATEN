@@ -130,3 +130,77 @@ def test_without_a_layout_nothing_is_placed(tmp_path):
     d.run_once()  # the fake runner has no .edges
     peer(d, kind="give-back", border="k", row=1.0)
     assert rec.calls == []
+
+
+# -- uinput backend (no hardware: a fake device records what would be written) ---------------------------------------------------
+
+BOX = (0, 0, 2560, 1440)
+
+
+def test_abs_position_maps_the_local_screens_onto_the_full_axis_range():
+    assert warp.abs_position(0, 0, BOX) == (0, 0)
+    assert warp.abs_position(2559, 1439, BOX) == (warp.ABS_MAX, warp.ABS_MAX)  # the last pixel is the end of the range
+    assert warp.abs_position(1279.5, 719.5, BOX) == (round(warp.ABS_MAX / 2), round(warp.ABS_MAX / 2))
+    assert warp.abs_position(-50, 99999, BOX) == (0, warp.ABS_MAX)  # clamped, never outside the device range
+
+
+def test_abs_position_follows_a_box_that_does_not_start_at_the_origin():
+    box = (-1920, 100, 640, 1540)  # two screens side by side
+    assert warp.abs_position(-1920, 100, box) == (0, 0)
+    assert warp.abs_position(639, 1539, box) == (warp.ABS_MAX, warp.ABS_MAX)
+
+
+class FakeDevice:
+    def __init__(self, fail=False):
+        self.events, self.synced, self.closed, self.fail = [], 0, False, fail
+
+    def write(self, etype, code, value):
+        if self.fail:
+            raise OSError("device gone")
+        self.events.append((etype, code, value))
+
+    def syn(self):
+        self.synced += 1
+
+    def close(self):
+        self.closed = True
+
+
+def test_uinput_warp_writes_both_axes_then_syncs():
+    dev = FakeDevice()
+    w = warp.UinputWarp(BOX, device_factory=lambda: dev)
+    assert w.place(2559, 0) is True
+    assert dev.events == [(warp.EV_ABS, warp.ABS_X, warp.ABS_MAX), (warp.EV_ABS, warp.ABS_Y, 0)]
+    assert dev.synced == 1
+    w.close()
+    assert dev.closed
+
+
+def test_uinput_warp_reports_a_failing_device_instead_of_raising(caplog):
+    w = warp.UinputWarp(BOX, device_factory=lambda: FakeDevice(fail=True))
+    assert w.place(10, 10) is False
+    assert "pointer placement failed" in caplog.text
+
+
+def test_uinput_state(tmp_path, monkeypatch):
+    node = tmp_path / "uinput"
+    assert warp.uinput_state(str(node)) == "missing"
+    node.write_text("")
+    monkeypatch.setattr(warp.os, "access", lambda path, mode: True)
+    assert warp.uinput_state(str(node)) == "ok"
+    monkeypatch.setattr(warp.os, "access", lambda path, mode: False)
+    assert warp.uinput_state(str(node)) == "denied"
+
+
+def test_make_is_opt_in_and_falls_back_to_the_null_backend(monkeypatch, caplog):
+    assert isinstance(warp.make("none", BOX), warp.NullWarp)
+    monkeypatch.setattr(warp, "uinput_state", lambda path=warp.UINPUT: "denied")
+    assert isinstance(warp.make("uinput", BOX), warp.NullWarp)
+    assert "denied" in caplog.text
+    monkeypatch.setattr(warp, "uinput_state", lambda path=warp.UINPUT: "ok")
+    assert isinstance(warp.make("uinput", None), warp.NullWarp)  # no layout: nothing to map onto
+    made = []
+    monkeypatch.setattr(warp, "UinputWarp", lambda box: made.append(box) or "backend")
+    assert warp.make("uinput", BOX) == "backend" and made == [BOX]
+    monkeypatch.setattr(warp, "UinputWarp", lambda box: (_ for _ in ()).throw(OSError("busy")))
+    assert isinstance(warp.make("uinput", BOX), warp.NullWarp)

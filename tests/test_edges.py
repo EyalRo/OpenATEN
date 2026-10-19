@@ -91,6 +91,62 @@ def test_remote_pointer_pushing_back_hands_control_back():
     assert sw.remote_report(move(30))
 
 
+class Placer:
+    def __init__(self, ok=True):
+        self.calls, self.ok = [], ok
+
+    def place(self, x, y):
+        self.calls.append((x, y))
+        return self.ok
+
+
+def pushed_back(placer):
+    sw = switch()
+    sw.warp = placer
+    calibrate(sw)
+    sw.local_motion(rel(dy=600))
+    sw.local_motion(rel(dx=-60))  # out at row 600
+    sw.entering()
+    move = lambda dx: bytes([1, 0, 0, dx & 0xFF, 0])
+    for dx in (-100, 100, 30):
+        sw.remote_report(move(dx))
+    assert sw.remote_report(move(30))
+    return sw
+
+
+def test_pushing_back_places_the_local_pointer_where_the_other_one_came_back():
+    placer = Placer()
+    sw = pushed_back(placer)
+    sw.leaving()
+    assert placer.calls == [(0, 600)]  # the last column of the desk, at the row the other pointer crossed
+    assert sw.local.known and sw.local.lo == [0, 600]  # known exactly now: no recalibration
+    sw.leaving()
+    assert len(placer.calls) == 1  # once per return
+
+
+def test_a_declining_backend_leaves_the_local_pointer_as_it_was():
+    placer = Placer(ok=False)
+    sw = pushed_back(placer)
+    before = list(sw.local.lo)
+    sw.leaving()
+    assert placer.calls == [(0, 600)] and sw.local.lo == before
+
+
+def test_returning_by_hotkey_or_without_a_backend_places_nothing():
+    placer = Placer()
+    sw = switch()
+    sw.warp = placer
+    calibrate(sw)
+    sw.local_motion(rel(dy=600))
+    sw.local_motion(rel(dx=-60))
+    sw.entering()
+    sw.leaving()  # no push-back happened: the hotkey returned control
+    assert placer.calls == []
+    sw2 = pushed_back(Placer())
+    sw2.warp = None
+    sw2.leaving()  # no backend: nothing to call, nothing raised
+
+
 def test_hotkey_entry_leaves_the_remote_position_unknown():
     sw = switch()
     assert sw.entering() == []
