@@ -134,14 +134,14 @@ def test_daemon_wires_options_into_the_daemon(monkeypatch, tmp_path):
     monkeypatch.setattr(signal, "signal", lambda sig, fn: handlers.update({sig: fn}))
     assert cli.main(["daemon", "--role", "slave", "--hotkey", "ctrl+alt+k", "--receive-dir", str(tmp_path / "in"), "--port", "1.2"]) == 0
     assert captured["role"] == "slave" and captured["hotkey"] == "ctrl+alt+k" and captured["port"] == "1.2"
-    assert captured["make_clipboard"] is None  # opt-in
+    assert callable(captured["make_clipboard"])  # clipboard sharing is on by default
     manager = captured["make_transfers"](lambda data: True)
     assert isinstance(manager, TransferManager) and manager.receive_dir == tmp_path / "in"
     assert set(handlers) == {signal.SIGINT, signal.SIGTERM}
     handlers[signal.SIGTERM](signal.SIGTERM, None)  # the handler asks the daemon to stop
 
 
-def test_daemon_without_receive_dir_can_send_but_not_receive(monkeypatch):
+def test_daemon_defaults_to_clipboard_on_and_receiving_into_downloads(monkeypatch):
     captured = {}
 
     class StubDaemon:
@@ -154,9 +154,12 @@ def test_daemon_without_receive_dir_can_send_but_not_receive(monkeypatch):
 
     monkeypatch.setattr(dm, "Daemon", StubDaemon)
     monkeypatch.setattr(signal, "signal", lambda *a: None)
-    assert cli.main(["daemon", "--clipboard"]) == 0
-    assert captured["make_transfers"](lambda data: True).receive_dir is None
+    assert cli.main(["daemon"]) == 0
     assert callable(captured["make_clipboard"])
+    assert captured["make_transfers"](lambda data: True).receive_dir == Path("~/Downloads").expanduser()
+    assert cli.main(["daemon", "--no-clipboard", "--receive-dir", ""]) == 0  # both can still be switched off
+    assert captured["make_clipboard"] is None
+    assert captured["make_transfers"](lambda data: True).receive_dir is None
 
 
 def test_make_clipboard_is_none_without_a_supported_tool(monkeypatch):

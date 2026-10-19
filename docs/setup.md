@@ -212,15 +212,15 @@ known, so no recalibration push is needed after a return.
 
 ## Clipboard and file transfer
 
-Both are opt-in and need `--role` on both computers; details in [applications.md](applications.md).
+Both are on by default (clipboard sharing; files received into `~/Downloads`) and need `--role` on both computers; details in [applications.md](applications.md). `--no-clipboard` turns clipboard sharing off.
 
 ```sh
-openaten daemon --role master --clipboard --receive-dir ~/Downloads/OpenATEN    # computer A
-openaten daemon --role slave  --clipboard --receive-dir ~/Downloads/OpenATEN    # computer B
-openaten send photo.jpg report.pdf                                              # on either: sends to the other computer
+openaten daemon --role master    # computer A
+openaten daemon --role slave     # computer B
+openaten send photo.jpg report.pdf                                 # on either: sends to the other computer
 ```
 
-Install `wl-clipboard` (Wayland) or `xclip` (X11) for clipboard sharing. Put the options in `config.toml` (`clipboard = true`, `receive_dir = "..."`) to keep them out of the service unit.
+Install `wl-clipboard` (Wayland) or `xclip` (X11) for clipboard sharing. Change the folder with `--receive-dir` or `receive_dir` in `config.toml`.
 
 ## NixOS module
 
@@ -235,8 +235,8 @@ The flake exports a NixOS module that installs the package, the udev rule and a 
     enable = true;
     role = "master";                      # "slave" on the other computer
     users = [ "me" ];                     # added to the input group
-    clipboard = true;                     # optional, see applications.md
-    receiveDir = "%h/Downloads/OpenATEN"; # optional: accept files from the other computer
+    # clipboard = false;                  # clipboard sharing is on by default, see applications.md
+    # receiveDir = "%h/Downloads";        # default: accept files from the other computer here (null turns receiving off)
     # logLevel = "INFO"; extraArgs = [ "--hotkey" "ctrl+alt+k" ]; usbStorageQuirk = true;
   };
 }
