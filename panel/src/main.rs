@@ -4,16 +4,17 @@
 //! Built like the other tray apps here: ksni (StatusNotifierItem over D-Bus) on its own thread, GTK4 + libadwaita on the main thread, an `mpsc`
 //! channel from the tray callbacks to a glib timer, and nothing computed inside `update()` (it runs in ksni's own runtime).
 
+mod actions;
+mod config;
 mod icons;
+mod perm;
 mod state;
 mod ui;
 
 use std::cell::RefCell;
 use std::path::PathBuf;
-use std::process::Command;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Sender};
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use adw::prelude::*;
@@ -21,6 +22,7 @@ use gtk::glib;
 use ksni::blocking::TrayMethods;
 use ksni::menu::StandardItem;
 use ksni::{MenuItem, ToolTip};
+use actions::toggle_forwarding;
 use state::{classify, tooltip_body, Snapshot};
 
 const APP_ID: &str = "com.openaten.Panel";
@@ -43,31 +45,6 @@ fn now() -> f64 {
 
 fn read_snapshot() -> Snapshot {
     classify(std::fs::read_to_string(status_path()).ok().as_deref(), now())
-}
-
-/// The `openaten` command: `$OPENATEN_BIN`, else `~/.local/bin/openaten` when present, else whatever is on PATH.
-fn openaten_bin() -> PathBuf {
-    if let Some(bin) = std::env::var_os("OPENATEN_BIN") {
-        return PathBuf::from(bin);
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        let local = PathBuf::from(home).join(".local/bin/openaten");
-        if local.exists() {
-            return local;
-        }
-    }
-    PathBuf::from("openaten")
-}
-
-fn toggle_forwarding() {
-    match Command::new(openaten_bin()).args(["ctl", "toggle"]).spawn() {
-        Ok(mut child) => {
-            thread::spawn(move || {
-                let _ = child.wait(); // reap it
-            });
-        }
-        Err(e) => eprintln!("openaten-panel: cannot run `openaten ctl toggle`: {e}"),
-    }
 }
 
 struct OpenAtenTray {
@@ -168,7 +145,7 @@ fn main() -> anyhow::Result<()> {
             return;
         }
         // The first activation is the start-up: stay in the tray, window hidden until asked for.
-        let ui = ui::Ui::new(app, &first, toggle_forwarding);
+        let ui = ui::Ui::new(app, &first);
         *window.borrow_mut() = Some(ui.clone());
 
         let commands = receiver.clone();

@@ -28,6 +28,10 @@
           cargoLock.lockFile = ./panel/Cargo.lock;
           nativeBuildInputs = [ pkgs.pkg-config pkgs.wrapGAppsHook4 ];
           buildInputs = [ pkgs.gtk4 pkgs.libadwaita ];
+          # `setfacl` for the window's explicit "Grant access" step (pkexec runs it by absolute path)
+          preFixup = ''
+            gappsWrapperArgs+=(--prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.acl ]})
+          '';
           postInstall = ''
             for f in assets/*.svg; do
               install -Dm644 "$f" "$out/share/icons/hicolor/scalable/apps/$(basename "$f")"

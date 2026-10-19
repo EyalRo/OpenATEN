@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 import json
 import logging
 import os
@@ -75,6 +76,25 @@ def cmd_layout(args) -> int:
     for local, remote in sw.pairs:
         axis = "xy"[local.axis]
         print(f"leave via {axis}{'+' if local.sign > 0 else '-'} at {axis}={local.line:g}, {'xy'[1 - local.axis]} {local.lo:g}..{local.hi:g}: into {local.far}; back from {remote.far}")
+    return 0
+
+
+def cmd_warp_test(args, sleep=time.sleep) -> int:
+    """Move the pointer to a few places through the uinput warp so you can watch it work (needs /dev/uinput access and a screen layout)."""
+    sw = _load_edges(args)
+    if sw is None:
+        print("no screen layout (screens.toml): the warp needs to know this computer's screens")
+        return 1
+    backend = warp.make("uinput", sw.local.box)
+    if backend.name != "uinput":
+        print(f"cannot use /dev/uinput ({warp.uinput_state()}); see docs/setup.md, Pointer warp")
+        return 1
+    left, top, right, bottom = sw.local.box
+    sleep(1.0)  # the compositor needs a moment to notice the new virtual device
+    for label, fx, fy in (("top-left", 0.1, 0.1), ("bottom-right", 0.9, 0.9), ("center", 0.5, 0.5), ("bottom-left", 0.1, 0.9)):
+        print(f"-> {label}", flush=True)
+        backend.place(left + fx * (right - left - 1), top + fy * (bottom - top - 1))
+        sleep(1.5)
     return 0
 
 
@@ -212,6 +232,9 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("strip", help="invisible border strips that report the exact pointer position at the shared screen borders")
     sp.add_argument("--screens", help="screen layout TOML (default: ~/.config/openaten/screens.toml)")
     sp.set_defaults(fn=cmd_strip)
+    wt = sub.add_parser("warp-test", help="move the pointer to a few places through the uinput warp (a quick check that it works)")
+    wt.add_argument("--screens", help="screen layout TOML (default: ~/.config/openaten/screens.toml)")
+    wt.set_defaults(fn=cmd_warp_test)
     ly = sub.add_parser("layout", help="show the borders derived from the screen layout")
     ly.add_argument("--screens", help="screen layout TOML (default: ~/.config/openaten/screens.toml)")
     ly.set_defaults(fn=cmd_layout)
