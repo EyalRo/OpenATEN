@@ -35,6 +35,11 @@ fn index(state: State) -> usize {
     }
 }
 
+/// The 64 px PNG of a state's icon (for the settings window header, which must not depend on the icon theme).
+pub fn png64(state: State) -> &'static [u8] {
+    SIZES[1].1[index(state)]
+}
+
 /// Decode one PNG (8-bit RGBA, as written by `assets/render-png.sh`) into a pixmap of the given size.
 pub fn decode(bytes: &[u8], size: i32) -> Option<ksni::Icon> {
     let mut decoder = png::Decoder::new(bytes);

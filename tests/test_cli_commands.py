@@ -183,3 +183,38 @@ def test_default_config_path_is_under_xdg(monkeypatch, tmp_path):
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     assert config.default_path() == Path(tmp_path) / "openaten" / "config.toml"
+
+
+def test_warp_test_visits_four_places_inside_the_local_screens(monkeypatch, tmp_path, capsys):
+    layout = tmp_path / "screens.toml"
+    layout.write_text(
+        'local = "desk"\n[[screen]]\nhost = "desk"\nname = "DP-1"\nx = 0\ny = 0\nwidth = 2560\nheight = 1440\n'
+        '[[screen]]\nhost = "laptop"\nname = "eDP-1"\nx = -1920\ny = 300\nwidth = 1920\nheight = 1200\n'
+    )
+    placed = []
+
+    class Backend:
+        name = "uinput"
+
+        def place(self, x, y):
+            placed.append((round(x), round(y)))
+            return True
+
+    monkeypatch.setattr(cli.warp, "make", lambda kind, box: Backend() if kind == "uinput" and tuple(box) == (0, 0, 2560, 1440) else None)
+    args = SimpleNamespace(screens=str(layout))
+    assert cli.cmd_warp_test(args, sleep=lambda s: None) == 0
+    assert placed == [(256, 144), (2303, 1295), (1280, 720), (256, 1295)]
+    assert capsys.readouterr().out.splitlines() == ["-> top-left", "-> bottom-right", "-> center", "-> bottom-left"]
+
+
+def test_warp_test_explains_a_missing_layout_or_permission(monkeypatch, tmp_path, capsys):
+    assert cli.cmd_warp_test(SimpleNamespace(screens=None), sleep=lambda s: None) == 1  # no layout file (the config dir is isolated)
+    assert "no screen layout" in capsys.readouterr().out
+    layout = tmp_path / "screens.toml"
+    layout.write_text(
+        'local = "desk"\n[[screen]]\nhost = "desk"\nname = "DP-1"\nx = 0\ny = 0\nwidth = 100\nheight = 100\n'
+        '[[screen]]\nhost = "laptop"\nname = "eDP-1"\nx = -100\ny = 0\nwidth = 100\nheight = 100\n'
+    )
+    monkeypatch.setattr(cli.warp, "make", lambda kind, box: cli.warp.NullWarp())
+    assert cli.cmd_warp_test(SimpleNamespace(screens=str(layout)), sleep=lambda s: None) == 1
+    assert "cannot use /dev/uinput" in capsys.readouterr().out

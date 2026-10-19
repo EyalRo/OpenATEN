@@ -30,6 +30,15 @@ impl State {
         }
     }
 
+    /// Label of the menu entry that flips forwarding, and whether it can work (the daemon must be running).
+    pub fn toggle_label(self) -> (&'static str, bool) {
+        match self {
+            State::Offline => ("Toggle forwarding", false),
+            State::Connected | State::Error => ("Start forwarding", true),
+            State::Forwarding => ("Return control to this computer", true),
+        }
+    }
+
     pub fn headline(self) -> &'static str {
         match self {
             State::Offline => "Offline",
@@ -56,16 +65,40 @@ pub struct Status {
     pub transfers: Option<Vec<serde_json::Value>>,
 }
 
-/// What the tray displays: the state and the tooltip rows (label, value).
+/// Whether the daemon's user can create uinput devices (what the pointer warp needs), as the daemon reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Uinput {
+    Ok,
+    Denied,
+    Missing,
+    /// The daemon is not running or did not say.
+    Unknown,
+}
+
+impl Uinput {
+    fn parse(s: Option<&str>) -> Uinput {
+        match s {
+            Some("ok") => Uinput::Ok,
+            Some("denied") => Uinput::Denied,
+            Some("missing") => Uinput::Missing,
+            _ => Uinput::Unknown,
+        }
+    }
+}
+
+/// What the tray and the window display: the state, the tooltip rows (label, value) and the pointer-warp facts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Snapshot {
     pub state: State,
     pub rows: Vec<(String, String)>,
+    pub uinput: Uinput,
+    /// The running daemon uses the uinput pointer warp.
+    pub warp_running: bool,
 }
 
 impl Snapshot {
     pub fn offline(reason: &str) -> Self {
-        Snapshot { state: State::Offline, rows: vec![("State".into(), reason.into())] }
+        Snapshot { state: State::Offline, rows: vec![("State".into(), reason.into())], uinput: Uinput::Unknown, warp_running: false }
     }
 }
 
@@ -117,7 +150,7 @@ pub fn classify(text: Option<&str>, now: f64) -> Snapshot {
     if let Some(err) = nonempty(&st.error) {
         rows.push(("Error".into(), err.into()));
     }
-    Snapshot { state, rows }
+    Snapshot { state, rows, uinput: Uinput::parse(st.uinput.as_deref()), warp_running: st.warp.as_deref() == Some("uinput") }
 }
 
 /// Tooltip body: one "label: value" line per row after the headline.
@@ -197,6 +230,19 @@ mod tests {
     }
 
     #[test]
+    fn the_snapshot_carries_the_uinput_access_and_whether_warp_is_running() {
+        let on = classify(Some(&status(r#""bridge": "present", "warp": "uinput", "uinput": "ok""#)), NOW);
+        assert_eq!((on.uinput, on.warp_running), (Uinput::Ok, true));
+        let denied = classify(Some(&status(r#""bridge": "present", "warp": "none", "uinput": "denied""#)), NOW);
+        assert_eq!((denied.uinput, denied.warp_running), (Uinput::Denied, false));
+        let missing = classify(Some(&status(r#""bridge": "present", "uinput": "missing""#)), NOW);
+        assert_eq!(missing.uinput, Uinput::Missing);
+        let old = classify(Some(&status(r#""bridge": "present""#)), NOW);
+        assert_eq!((old.uinput, old.warp_running), (Uinput::Unknown, false), "an older daemon does not say");
+        assert_eq!(classify(None, NOW).uinput, Uinput::Unknown);
+    }
+
+    #[test]
     fn tooltip_body_skips_the_headline() {
         let snap = classify(Some(&status(r#""bridge": "present", "hotkey": "k""#)), NOW);
         assert_eq!(tooltip_body(&snap), "Bridge: connected\nHotkey: k");
@@ -205,6 +251,14 @@ mod tests {
     #[test]
     fn pixels_become_argb_in_network_order() {
         assert_eq!(rgba_to_argb(&[1, 2, 3, 4, 10, 20, 30, 255]), vec![4, 1, 2, 3, 255, 10, 20, 30]);
+    }
+
+    #[test]
+    fn the_toggle_entry_says_what_it_will_do_and_is_off_without_a_daemon() {
+        assert_eq!(State::Offline.toggle_label(), ("Toggle forwarding", false));
+        assert_eq!(State::Connected.toggle_label(), ("Start forwarding", true));
+        assert_eq!(State::Forwarding.toggle_label(), ("Return control to this computer", true));
+        assert!(State::Error.toggle_label().1, "forwarding can still be switched off after an error");
     }
 
     #[test]
