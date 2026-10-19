@@ -66,6 +66,7 @@ class Forwarder:
         self.on_state = on_state or (lambda grabbed: None)
         self.keys_down = keys_down or (lambda: False)
         self.chord, self.trigger = parse_hotkey(hotkey)
+        self._swallow_trigger = False  # the press of the trigger that toggled is still down: swallow its repeats and release
         self.desired = False  # what the user asked for
         self.active = False  # devices are grabbed (the request has been applied)
         self._held: set[int] = set()  # physical keys currently down (tracked from events)
@@ -119,13 +120,19 @@ class Forwarder:
                 events = []  # the touch that pushed through is consumed; forwarding starts with the next touch
         forward: list[tuple[int, int, int]] = []
         for etype, code, value in events:
+            if etype == H.EV_KEY and code == self.trigger and self._swallow_trigger:
+                # The press that toggled is never forwarded, nor are its auto-repeats or its release. Only that press: the trigger is often a
+                # typing key (the default hotkey ends in k), and every other press of it is an ordinary key for the other computer.
+                if value == 0:
+                    self._swallow_trigger = False
+                    self._held.discard(code)
+                continue
             if etype == H.EV_KEY and value in (0, 1):
                 (self._held.add if value else self._held.discard)(code)
                 if value == 1 and code == self.trigger and self.chord <= self._held:
+                    self._swallow_trigger = True
                     self.request(not self.desired)
                     continue  # the toggle press itself is never forwarded
-                if code == self.trigger:  # also swallow the trigger's release
-                    continue
             if self.forwarding:
                 forward.append((etype, code, value))
         if forward:
