@@ -1,7 +1,7 @@
 # Application protocols: clipboard and files
 
-Both ride on the reliable link (see [design.md](design.md)) as typed messages on their own channels and are **opt-in**: nothing is shared
-unless you start the daemon with the matching option. They need the daemon in role mode (`openaten daemon --role master|slave` on both computers).
+Both ride on the reliable link (see [design.md](design.md)) as typed messages on their own channels and are **on by default**: clipboard sharing is enabled and files are received into `~/Downloads` (`--no-clipboard` turns the clipboard off); nothing is shared
+until the daemon runs in role mode. They need the daemon in role mode (`openaten daemon --role master|slave` on both computers).
 
 | Channel | Used for | Module |
 |---|---|---|

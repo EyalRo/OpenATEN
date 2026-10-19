@@ -25,7 +25,7 @@ provide the same features on Linux, **without the network**, so they keep workin
 | Reliable messaging link (framing, CRC, chunking, polling, auto-resync) | `openaten link --mib 64` |
 | Keyboard/mouse injection onto the other end's HID interface | `openaten hid` |
 | Edge hand-off between the computers' screens (mouse pushes through the shared border) | [docs/setup.md](docs/setup.md#edge-hand-off-push-the-pointer-through-the-screen-border) |
-| Clipboard sharing and file transfer between the computers (opt-in, **untested on hardware**) | [docs/applications.md](docs/applications.md) |
+| Clipboard sharing and file transfer between the computers (on by default, **untested on hardware**) | [docs/applications.md](docs/applications.md) |
 | Documented command and packet formats | [docs/protocol.md](docs/protocol.md) |
 
 ## Quick start
