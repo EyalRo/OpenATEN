@@ -19,13 +19,15 @@
           nativeCheckInputs = [ pkgs.python3Packages.pytestCheckHook pkgs.python3Packages.hypothesis ];
           meta.mainProgram = "openaten";
         };
-        # The tray icon (and, later, settings panel) app: a ksni (StatusNotifierItem) tray that follows the daemon's status file.
+        # The tray icon and setup window app: a ksni (StatusNotifierItem) tray that follows the daemon's status file; left-click opens a GTK4 window.
         # `cargo test` runs in the build; the icons are installed so hosts that resolve themed icon names find them.
         panel = pkgs.rustPlatform.buildRustPackage {
           pname = "openaten-panel";
           version = (builtins.fromTOML (builtins.readFile ./panel/Cargo.toml)).package.version;
           src = ./panel;
           cargoLock.lockFile = ./panel/Cargo.lock;
+          nativeBuildInputs = [ pkgs.pkg-config pkgs.wrapGAppsHook4 ];
+          buildInputs = [ pkgs.gtk4 pkgs.libadwaita ];
           postInstall = ''
             for f in assets/*.svg; do
               install -Dm644 "$f" "$out/share/icons/hicolor/scalable/apps/$(basename "$f")"

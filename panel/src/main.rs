@@ -1,23 +1,36 @@
-//! `openaten-panel`: the OpenATEN tray icon. It shows the state of the running `openaten daemon` (read from its status file) and toggles
-//! forwarding on click. The settings panel (layout editor, permissions) will live in this same app; see docs.
+//! `openaten-panel`: the OpenATEN tray icon and setup window. The tray shows the state of the running `openaten daemon` (read from its status file);
+//! left-click shows or hides the setup window and right-click is the host's menu, the same split as the `mediawatch` tray app.
 //!
-//! Built like the other tray apps here: ksni (StatusNotifierItem over D-Bus), a polling thread, and nothing computed inside `update()`
-//! (it runs in ksni's own runtime).
+//! Built like the other tray apps here: ksni (StatusNotifierItem over D-Bus) on its own thread, GTK4 + libadwaita on the main thread, an `mpsc`
+//! channel from the tray callbacks to a glib timer, and nothing computed inside `update()` (it runs in ksni's own runtime).
 
 mod icons;
 mod state;
+mod ui;
 
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::process::Command;
+use std::rc::Rc;
+use std::sync::mpsc::{self, Sender};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use adw::prelude::*;
+use gtk::glib;
 use ksni::blocking::TrayMethods;
 use ksni::menu::StandardItem;
 use ksni::{MenuItem, ToolTip};
 use state::{classify, tooltip_body, Snapshot};
 
-const POLL: Duration = Duration::from_secs(1);
+const APP_ID: &str = "com.openaten.Panel";
+
+enum UiCommand {
+    /// Left-click: show the window, or hide it when it is showing.
+    Toggle,
+    /// Menu entry: show the window.
+    Show,
+}
 
 fn status_path() -> PathBuf {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"));
@@ -59,6 +72,7 @@ fn toggle_forwarding() {
 
 struct OpenAtenTray {
     snapshot: Snapshot,
+    sender: Sender<UiCommand>,
 }
 
 impl ksni::Tray for OpenAtenTray {
@@ -83,20 +97,40 @@ impl ksni::Tray for OpenAtenTray {
         }
     }
     fn activate(&mut self, _x: i32, _y: i32) {
-        toggle_forwarding();
+        let _ = self.sender.send(UiCommand::Toggle);
     }
     fn menu(&self) -> Vec<MenuItem<Self>> {
-        vec![
-            StandardItem { label: self.snapshot.state.headline().into(), enabled: false, ..Default::default() }.into(),
-            MenuItem::Separator,
+        let show = self.sender.clone();
+        let (toggle_label, toggle_enabled) = self.snapshot.state.toggle_label();
+        let mut items: Vec<MenuItem<Self>> = vec![StandardItem { label: self.snapshot.state.headline().into(), enabled: false, ..Default::default() }.into()];
+        // The details, read-only, so the menu shows the whole picture without hovering for the tooltip.
+        for (key, value) in self.snapshot.rows.iter().skip(1) {
+            items.push(StandardItem { label: format!("{key}: {value}"), enabled: false, ..Default::default() }.into());
+        }
+        items.push(MenuItem::Separator);
+        items.push(
             StandardItem {
-                label: "Toggle forwarding".into(),
+                label: "Open OpenATEN".into(),
+                icon_name: "preferences-system".into(),
+                activate: Box::new(move |_| {
+                    let _ = show.send(UiCommand::Show);
+                }),
+                ..Default::default()
+            }
+            .into(),
+        );
+        items.push(
+            StandardItem {
+                label: toggle_label.into(),
                 icon_name: "input-keyboard".into(),
+                enabled: toggle_enabled,
                 activate: Box::new(|_| toggle_forwarding()),
                 ..Default::default()
             }
             .into(),
-            MenuItem::Separator,
+        );
+        items.push(MenuItem::Separator);
+        items.push(
             StandardItem {
                 label: "Quit".into(),
                 icon_name: "application-exit".into(),
@@ -104,7 +138,8 @@ impl ksni::Tray for OpenAtenTray {
                 ..Default::default()
             }
             .into(),
-        ]
+        );
+        items
     }
 }
 
@@ -117,15 +152,50 @@ fn main() -> anyhow::Result<()> {
         }
         return Ok(());
     }
-    let mut last = read_snapshot();
-    let tray = OpenAtenTray { snapshot: last.clone() }.assume_sni_available(true).spawn()?;
-    loop {
-        thread::sleep(POLL);
-        let snapshot = read_snapshot(); // read here, outside update(): that closure runs inside ksni's runtime
-        if snapshot != last {
-            let shown = snapshot.clone();
-            tray.update(move |t| t.snapshot = shown);
-            last = snapshot;
+
+    adw::init()?;
+    let app = adw::Application::builder().application_id(APP_ID).build();
+    let _hold = app.hold(); // stay alive in the tray while the window is hidden
+    let (sender, receiver) = mpsc::channel();
+    let first = read_snapshot();
+    let tray = OpenAtenTray { snapshot: first.clone(), sender }.assume_sni_available(true).spawn()?;
+    let receiver = Rc::new(receiver);
+    let window: Rc<RefCell<Option<Rc<ui::Ui>>>> = Rc::new(RefCell::new(None));
+
+    app.connect_activate(move |app| {
+        if let Some(ui) = window.borrow().as_ref() {
+            ui.window.present(); // a second launch (from a launcher) shows the window
+            return;
         }
-    }
+        // The first activation is the start-up: stay in the tray, window hidden until asked for.
+        let ui = ui::Ui::new(app, &first, toggle_forwarding);
+        *window.borrow_mut() = Some(ui.clone());
+
+        let commands = receiver.clone();
+        let win = ui.window.clone();
+        glib::timeout_add_local(Duration::from_millis(100), move || {
+            while let Ok(command) = commands.try_recv() {
+                match command {
+                    UiCommand::Toggle if win.is_visible() => win.set_visible(false),
+                    UiCommand::Toggle | UiCommand::Show => win.present(),
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+
+        let tray = tray.clone();
+        let last = Rc::new(RefCell::new(first.clone()));
+        glib::timeout_add_seconds_local(1, move || {
+            let snapshot = read_snapshot(); // read here, outside update(): that closure runs inside ksni's runtime
+            if snapshot != *last.borrow() {
+                let shown = snapshot.clone();
+                tray.update(move |t| t.snapshot = shown);
+                ui.update(&snapshot);
+                *last.borrow_mut() = snapshot;
+            }
+            glib::ControlFlow::Continue
+        });
+    });
+    let _ = app.run_with_args::<&str>(&[]);
+    Ok(())
 }

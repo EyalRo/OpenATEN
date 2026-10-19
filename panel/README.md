@@ -1,13 +1,13 @@
 # openaten-panel
 
-The OpenATEN tray icon: a StatusNotifierItem (ksni) that follows the running `openaten daemon` and toggles forwarding on click. It is meant to replace
+The OpenATEN tray icon: a StatusNotifierItem (ksni) that follows the running `openaten daemon`; left-click (or right-click) opens a menu with the details and a forwarding toggle. It is meant to replace
 the Noctalia bar widget in [`../noctalia`](../noctalia), and to grow into the settings panel (screen layout editor, permissions, pointer warp).
 
 - **State** is read once a second from `$XDG_RUNTIME_DIR/openaten/status.json` (the daemon's status file). A missing or stale file means the daemon is not running.
   Icons: offline (grey), connected (green dot), forwarding (orange dot, yellow pointer), error (red dot).
 - **Tooltip** rows: state, bridge, role, input devices, hotkey, edge hand-off, pointer warp (only when on or unable to work), transfers, error. Rows the
   daemon does not report are left out, so older daemons work.
-- **Click / "Toggle forwarding"** runs `openaten ctl toggle` (`$OPENATEN_BIN`, else `~/.local/bin/openaten`, else `openaten` on PATH).
+- **Menu** (left-click): the state and the same detail rows as the tooltip, read-only, then "Start forwarding" / "Return control to this computer" (off while the daemon is not running) and Quit. The toggle runs `openaten ctl toggle` (`$OPENATEN_BIN`, else `~/.local/bin/openaten`, else `openaten` on PATH).
 - `openaten-panel --status` prints what the tray would show and exits; handy over SSH.
 
 ```sh

@@ -2,12 +2,14 @@
 name = "openaten-panel"
 version = "0.1.0"
 edition = "2021"
-description = "OpenATEN tray icon (and, later, settings panel) for the openaten daemon"
+description = "OpenATEN tray icon and settings window for the openaten daemon"
 license = "MIT"
 publish = false
 
 [dependencies]
 anyhow = "1.0"
+gtk = { package = "gtk4", version = "0.10", features = ["v4_12"] }
+adw = { package = "libadwaita", version = "0.8", features = ["v1_4"] }
 ksni = { version = "0.3", features = ["blocking"] }
 png = "0.17"
 serde = { version = "1.0", features = ["derive"] }

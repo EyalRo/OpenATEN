@@ -30,6 +30,15 @@ impl State {
         }
     }
 
+    /// Label of the menu entry that flips forwarding, and whether it can work (the daemon must be running).
+    pub fn toggle_label(self) -> (&'static str, bool) {
+        match self {
+            State::Offline => ("Toggle forwarding", false),
+            State::Connected | State::Error => ("Start forwarding", true),
+            State::Forwarding => ("Return control to this computer", true),
+        }
+    }
+
     pub fn headline(self) -> &'static str {
         match self {
             State::Offline => "Offline",
@@ -205,6 +214,14 @@ mod tests {
     #[test]
     fn pixels_become_argb_in_network_order() {
         assert_eq!(rgba_to_argb(&[1, 2, 3, 4, 10, 20, 30, 255]), vec![4, 1, 2, 3, 255, 10, 20, 30]);
+    }
+
+    #[test]
+    fn the_toggle_entry_says_what_it_will_do_and_is_off_without_a_daemon() {
+        assert_eq!(State::Offline.toggle_label(), ("Toggle forwarding", false));
+        assert_eq!(State::Connected.toggle_label(), ("Start forwarding", true));
+        assert_eq!(State::Forwarding.toggle_label(), ("Return control to this computer", true));
+        assert!(State::Error.toggle_label().1, "forwarding can still be switched off after an error");
     }
 
     #[test]
