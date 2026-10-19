@@ -103,10 +103,10 @@ Status: **built and unit-tested against a fake backend and fake link; not yet ve
 
 ## Use
 ```sh
-openaten daemon --role master --clipboard      # computer A  (or clipboard = true in config.toml)
-openaten daemon --role slave  --clipboard      # computer B
+openaten daemon --role master      # computer A  (clipboard sharing is on by default; --no-clipboard turns it off)
+openaten daemon --role slave       # computer B
 ```
-Opt-in on each computer; needs the link (`--role`) and, in a graphical session, `wl-clipboard` (Wayland) or `xclip` (X11). Without a tool, sharing is disabled with a WARNING.
+On by default on each computer; needs the link (`--role`) and, in a graphical session, `wl-clipboard` (Wayland) or `xclip` (X11). Without a tool, sharing is disabled with a WARNING.
 
 ## Behaviour
 - Shares `text/plain` and `image/png` (text wins when both are offered), up to 8 MiB per clip; larger clips are skipped with a WARNING.
@@ -137,7 +137,7 @@ Status: **built and unit-tested with in-memory wiring and a fake link; not yet v
 
 ## Use
 ```sh
-openaten daemon --role slave --receive-dir ~/Downloads/OpenATEN   # receiving computer (opt-in; or receive_dir in config.toml)
+openaten daemon --role slave                  # receiving computer: files go to ~/Downloads (--receive-dir or receive_dir in config.toml to change)
 openaten send photo.jpg report.pdf                                 # on the other computer, through its running daemon
 openaten ctl status                                                # "transfers": id, name, direction, size, done, state, error
 ```
@@ -156,7 +156,7 @@ either                 cancel  {id}
 Framing (all application channels, `appmsg.py`): 4-byte big-endian header length, JSON header (`kind`, `v`), raw payload. Malformed messages and messages from a newer `v` are dropped.
 
 ## Receiver safety (why it is built this way)
-- **Opt-in** per computer; nothing is accepted by default.
+- Files are accepted into `~/Downloads` by default; nothing is accepted without a running daemon in role mode.
 - The offered name is reduced to a plain file name: no directories (both `/` and `\`), no control characters, no leading dots, at most 200 bytes.
 - The transfer id becomes part of a temp file name, so ids are restricted to `[0-9A-Za-z_-]{1,64}`; anything else (including non-strings) is ignored. This closed a path-traversal hole found in review.
 - Data goes to `.openaten-<id>.part` (mode 0600) and is **hard-linked** to its final name only after the SHA-256 and size match, so it **never overwrites** (`name (1).ext` is used on collisions); filesystems without hard links fall back to a checked rename.

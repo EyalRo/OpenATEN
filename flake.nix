@@ -39,7 +39,7 @@
             text = builtins.readFile ./udev/70-openaten.rules;
           };
           args = [ "daemon" "--role" cfg.role ]
-            ++ lib.optional cfg.clipboard "--clipboard"
+            ++ [ (if cfg.clipboard then "--clipboard" else "--no-clipboard") ]
             ++ lib.optionals (cfg.receiveDir != null) [ "--receive-dir" cfg.receiveDir ]
             ++ cfg.extraArgs;
         in {
@@ -55,10 +55,14 @@
               type = lib.types.enum [ "master" "slave" ];
               description = "Link role: `master` on one computer, `slave` on the other.";
             };
-            clipboard = lib.mkEnableOption "clipboard sharing with the other computer (needs wl-clipboard or xclip in the session)";
+            clipboard = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+              description = "Share the clipboard with the other computer (needs wl-clipboard or xclip in the session). On by default.";
+            };
             receiveDir = lib.mkOption {
               type = lib.types.nullOr lib.types.str;
-              default = null;
+              default = "%h/Downloads";
               example = "%h/Downloads/OpenATEN";
               description = "Accept files sent from the other computer into this directory (systemd specifiers such as %h work). Receiving is off when null.";
             };
