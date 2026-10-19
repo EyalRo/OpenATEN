@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>OpenATEN</title>
+  <rect x="3" y="28" width="26" height="18" rx="3.5" fill="#0f766e"/>
+  <rect x="33" y="10" width="28" height="34" rx="3.5" fill="#1d4ed8"/>
+  <path d="M25 17 L25 38 L30 33.5 L33.6 41.5 L37.4 39.8 L33.8 32 L40.5 32 Z" fill="#facc15" stroke="#0f172a" stroke-width="2" stroke-linejoin="round"/>
+  <circle cx="52" cy="52" r="9" fill="#f97316" stroke="#ffffff" stroke-width="2.5"/>
+  
+</svg>

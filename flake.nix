@@ -19,6 +19,20 @@
           nativeCheckInputs = [ pkgs.python3Packages.pytestCheckHook pkgs.python3Packages.hypothesis ];
           meta.mainProgram = "openaten";
         };
+        # The tray icon (and, later, settings panel) app: a ksni (StatusNotifierItem) tray that follows the daemon's status file.
+        # `cargo test` runs in the build; the icons are installed so hosts that resolve themed icon names find them.
+        panel = pkgs.rustPlatform.buildRustPackage {
+          pname = "openaten-panel";
+          version = (builtins.fromTOML (builtins.readFile ./panel/Cargo.toml)).package.version;
+          src = ./panel;
+          cargoLock.lockFile = ./panel/Cargo.lock;
+          postInstall = ''
+            for f in assets/*.svg; do
+              install -Dm644 "$f" "$out/share/icons/hicolor/scalable/apps/$(basename "$f")"
+            done
+          '';
+          meta.mainProgram = "openaten-panel";
+        };
         # Border strips (`openaten strip`): GTK4 + gtk4-layer-shell. gtk4-layer-shell must be preloaded before libwayland-client, so this
         # lives in its own wrapper instead of slowing down the daemon.
         strip =
@@ -115,6 +129,7 @@
       checks = forAll (pkgs: {
         # `nix flake check` only evaluates packages, so build the default one here: that runs the test suite inside the Nix build.
         package = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        panel = self.packages.${pkgs.stdenv.hostPlatform.system}.panel;  # builds the tray app and runs its cargo tests
         nixos-module-eval =
           let
             sys = nixpkgs.lib.nixosSystem {
