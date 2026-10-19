@@ -134,3 +134,52 @@ def test_touchpad_events_are_forwarded_as_mouse_motion_and_block_the_grab_while_
     assert f.active  # grab stays until the finger lifts
     f.handle([(hid.EV_KEY, BTN_TOUCH, 0), (hid.EV_SYN, 0, 0)], source="pad", touchpad=True)
     assert not f.active and states == [True, False]
+
+
+# -- a trigger that is also a typing key (the default hotkey is ctrl+alt+shift+k) ---------------------------------------------------
+
+SHIFT, K = 42, 37
+K_DOWN = bytes([2, 0, 0x0E, 0, 0, 0, 0, 0])  # HID usage 0x0E is the letter k
+ALL_UP = bytes([2, 0, 0, 0, 0, 0, 0, 0])
+
+
+def make_k():
+    sent, states = [], []
+    return Forwarder(sent.append, hotkey="ctrl+alt+shift+k", on_state=states.append), sent, states
+
+
+def toggle_with_k(f):
+    f.handle([press(CTRL), press(ALT), press(SHIFT), press(K), release(K), release(SHIFT), release(ALT), release(CTRL)])
+
+
+def test_the_trigger_letter_is_typed_normally_while_forwarding():
+    f, sent, _ = make_k()
+    toggle_with_k(f)
+    assert f.forwarding and sent == []
+    f.handle([press(K), release(K)])  # a plain k: it must reach the other computer, press and release
+    assert sent == [K_DOWN, ALL_UP]
+
+
+def test_the_trigger_letter_is_not_swallowed_when_forwarding_is_off_either():
+    f, sent, states = make_k()
+    f.handle([press(K), release(K)])  # no chord: nothing to toggle, nothing forwarded (forwarding is off)
+    assert not f.desired and states == [] and sent == []
+
+
+def test_ctrl_plus_the_trigger_letter_is_forwarded_as_a_shortcut_not_taken_as_the_hotkey():
+    f, sent, states = make_k()
+    toggle_with_k(f)
+    f.handle([press(CTRL), press(K), release(K), release(CTRL)])
+    assert f.forwarding and states == [True], "a partial chord must not toggle"
+    assert bytes([2, 0x01, 0x0E, 0, 0, 0, 0, 0]) in sent  # ctrl held + k, reaching the other computer
+
+
+def test_only_the_toggling_press_is_swallowed_with_its_release_and_repeats():
+    f, sent, states = make_k()
+    f.handle([press(CTRL), press(ALT), press(SHIFT), press(K), (hid.EV_KEY, K, 2), release(K), release(SHIFT), release(ALT), release(CTRL)])
+    assert f.forwarding and states == [True] and sent == [], "the toggling k, its auto-repeat and its release produce no reports"
+    f.handle([press(K), release(K)])
+    assert sent == [K_DOWN, ALL_UP], "the next k is a normal key"
+    toggle_with_k(f)
+    assert not f.forwarding and states == [True, False]
+    assert sent == [K_DOWN, ALL_UP], "toggling off sends nothing for the k either"
