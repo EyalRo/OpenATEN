@@ -134,8 +134,12 @@ def coalesce_mouse(reports: list[bytes]) -> list[bytes]:
     """Merge runs of consecutive mouse reports that share a button state into as few reports as carry the same motion.
 
     Relative motion and wheel are summed (split again when a sum exceeds a signed byte), so a backlog from a fast mouse costs
-    fewer bridge commands without changing the pointer's path end points. Reports of any other kind, and any change of button
-    state, keep their position and are never merged across.
+    fewer bridge commands. Reports of any other kind, and any change of button state, keep their position and are never merged across.
+
+    Motion is also never merged across a reversal of direction on an axis. The other computer's pointer clamps at its screen edges after
+    every report, so only same-direction runs end where the originals would (clamping is monotone). Merging a reversal changes the result:
+    the edge hand-off slams the pointer far past the top-left corner and then moves it to the entry row, and a merged slam-and-move would
+    leave it near the top instead of on the row (and make the dead-reckoned position wrong afterwards).
     """
     out: list[bytes] = []
     run: list[int] | None = None  # [buttons, wheel, dx, dy] of the mouse run being merged
@@ -154,7 +158,7 @@ def coalesce_mouse(reports: list[bytes]) -> list[bytes]:
     for r in reports:
         if len(r) == 5 and r[0] == MOUSE_REPORT_ID:
             buttons, wheel, dx, dy = r[1], _s8(r[2]), _s8(r[3]), _s8(r[4])
-            if run is not None and run[0] == buttons:
+            if run is not None and run[0] == buttons and run[2] * dx >= 0 and run[3] * dy >= 0:  # no reversal on either axis
                 run[1] += wheel
                 run[2] += dx
                 run[3] += dy

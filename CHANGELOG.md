@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## Unreleased
 
+### Fixed
+- Role mode (`daemon --role`): the edge hand-off put the other computer's pointer at the top of its screen whatever the entry row, and handed control back in the middle of the screen. Mouse-report coalescing merged the entry slam (far past the corner, clamped by the compositor) with the move to the row, so the pointer never reached the corner and the dead-reckoned position went wrong. Reports are now merged only while motion keeps its direction on each axis, which clamping at the screen edges cannot tell apart from sending them one by one.
+
 ## 0.2.0 - 2026-10-19
 
 ### Added
