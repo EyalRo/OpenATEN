@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openaten"
-version = "0.2.0"
+version = "0.2.1"
 description = "Open tooling for the host-to-host bridge in ATEN US3342-class USB-C sharing switches (experimental)"
 readme = "README.md"
 requires-python = ">=3.10"
