@@ -57,7 +57,7 @@ def test_hid_reports():
 
 def test_coalesce_sums_motion_within_a_button_state_and_splits_overflow():
     m = pr.mouse_report
-    assert pr.coalesce_mouse([m(0, 5, 1), m(0, -2, 3), m(0, 1, 0)]) == [m(0, 4, 4)]
+    assert pr.coalesce_mouse([m(0, 5, 1), m(0, 2, 3), m(0, 1, 0)]) == [m(0, 8, 4)]
     assert pr.coalesce_mouse([m(0, 100, 0), m(0, 100, 0)]) == [m(0, 127, 0), m(0, 73, 0)]
     assert pr.coalesce_mouse([m(0, 0, 0, wheel=1), m(0, 0, 0, wheel=1)]) == [m(0, 0, 0, wheel=2)]
 
@@ -94,3 +94,46 @@ def dedup(rs):
         if not out or out[-1][1] != r[1]:
             out.append(r)
     return out
+
+
+# -- coalescing must not change where a pointer that clamps at the screen edges ends up ---------------------------------------------
+# The edge hand-off slams the other computer's pointer far past the top-left corner (the compositor clamps it there) and then moves it to the
+# entry row. Merging those two into one summed report removes the clamp in between, so the pointer ends up somewhere else.
+
+
+def clamped_end(reports, start, size):
+    """Where a pointer starting at ``start`` ends up when every report moves it and the screen edges clamp it after each one."""
+    x, y = start
+    for r in reports:
+        if len(r) == 5 and r[0] == pr.MOUSE_REPORT_ID:
+            dx, dy = (v - 256 if v > 127 else v for v in (r[3], r[4]))
+            x = min(max(x + dx, 0), size[0])
+            y = min(max(y + dy, 0), size[1])
+    return x, y
+
+
+def test_the_edge_slam_and_the_move_to_the_entry_row_are_not_merged():
+    from openaten import hid
+
+    slam = hid.move_reports(-2300, -1400)  # far past the top-left corner of a 1920x1200 screen
+    go = hid.move_reports(1900, 700)  # then to the entry point
+    merged = pr.coalesce_mouse(slam + go)
+    for start in [(0, 0), (960, 600), (1920, 1200), (10, 1100)]:
+        assert clamped_end(merged, start, (1920, 1200)) == clamped_end(slam + go, start, (1920, 1200)) == (1900, 700)
+
+
+def test_motion_that_reverses_direction_on_an_axis_is_kept_apart_but_same_direction_runs_still_merge():
+    m = pr.mouse_report
+    assert pr.coalesce_mouse([m(0, 100, 0), m(0, -100, 0)]) == [m(0, 100, 0), m(0, -100, 0)]
+    assert pr.coalesce_mouse([m(0, 0, 5), m(0, 0, -5)]) == [m(0, 0, 5), m(0, 0, -5)]
+    assert pr.coalesce_mouse([m(0, 3, 0), m(0, 0, -2), m(0, 4, 0)]) == [m(0, 7, -2)]  # a different axis moving the other way is fine
+    assert pr.coalesce_mouse([m(0, 100, 0), m(0, 100, 0), m(0, -1, 0)]) == [m(0, 127, 0), m(0, 73, 0), m(0, -1, 0)]
+
+
+@given(
+    st.lists(st.tuples(st.integers(-127, 127), st.integers(-127, 127)), max_size=40),
+    st.tuples(st.integers(0, 300), st.integers(0, 200)),
+)
+def test_coalescing_never_changes_where_a_clamped_pointer_ends_up(motion, start):
+    reports = [pr.mouse_report(0, dx, dy) for dx, dy in motion]
+    assert clamped_end(pr.coalesce_mouse(reports), start, (300, 200)) == clamped_end(reports, start, (300, 200))
