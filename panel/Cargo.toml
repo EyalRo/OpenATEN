@@ -1,6 +1,6 @@
 [package]
 name = "openaten-panel"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "OpenATEN tray icon and settings window for the openaten daemon"
 license = "MIT"
