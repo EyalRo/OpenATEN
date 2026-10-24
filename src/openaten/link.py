@@ -186,7 +186,7 @@ class LinkSession:
             frame = Frame(KIND_DATA, 0, self._seq, self._ack, SLOT, carried.channel, carried.msg_id, carried.offset,
                           carried.total, carried.payload)
         else:
-            frame = Frame(KIND_POLL, self._seq, self._ack)
+            frame = Frame(KIND_POLL, seq=self._seq, ack=self._ack)
         nxt = self._chunks[0] if self._chunks else None
         frame.next_len = wire_len(len(nxt.payload)) if nxt is not None else SLOT
         if nxt is not None or self._hid or time.monotonic() < self._hid_active_until:
