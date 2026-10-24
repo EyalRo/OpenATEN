@@ -191,3 +191,11 @@ def test_a_backlog_of_mouse_reports_is_coalesced_without_losing_motion():
             time.sleep(0.01)
     assert sum(r[3] for r in p.bridge.b.hid_in) == n  # every count of motion arrived
     assert p.master.stats["hid_sent"] + p.master.stats["hid_coalesced"] == n
+
+
+def test_poll_frames_carry_seq_and_ack_in_their_own_fields_and_survive_a_long_session():
+    s = LinkSession(FakeBridge().a, True)
+    s._seq, s._ack = 70000, 12345  # past the 16-bit range the flags field has
+    frame, length, _ = s._build()
+    back = Frame.decode(frame.encode(length))
+    assert (back.kind, back.seq, back.ack, back.flags) == (link.KIND_POLL, 70000, 12345, 0)

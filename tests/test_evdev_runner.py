@@ -166,3 +166,25 @@ def test_open_picks_keyboards_and_mice_and_skips_the_bridge(monkeypatch):
     assert not runner.open()  # nothing readable
     for d in (kbd, mouse, bridge):
         d.close()
+
+
+def test_a_stale_injection_error_is_cleared_when_the_hotkey_forwards_again():
+    runner, kbd, _ = make()
+    calls = []
+
+    def flaky(report):
+        calls.append(report)
+        if len(calls) == 1:
+            raise RuntimeError("no bridge end connected")
+
+    runner._send_report = flaky
+    toggle(kbd)
+    runner.step(0.05)
+    kbd.push((hid.EV_KEY, A, 1), (hid.EV_KEY, A, 0))
+    runner.step(0.05)
+    runner.step(0.05)
+    assert "injection failed" in runner.status()["error"]
+    toggle(kbd)  # the bridge is back; the user presses the hotkey again
+    runner.step(0.05)
+    assert runner.status()["forwarding"] and runner.status()["error"] is None
+    kbd.close()

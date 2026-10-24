@@ -278,6 +278,7 @@ class EvdevRunner:
                         self.error = f"could not grab {d.name}: {e} (is another openaten instance running?)"
                         self._abort = True  # step() returns control: never forward while the desktop still sees the input
                         return
+            self.error = None  # a stale failure from an earlier session (hotkey and edge pushes do not go through request())
             self._active_since = time.monotonic()
             log.info("devices grabbed: forwarding ON  (press the hotkey again to return control)")
         else:
