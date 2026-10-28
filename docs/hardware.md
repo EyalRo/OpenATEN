@@ -71,6 +71,23 @@ Only transfers whose length equals the armed receive buffer were tested; shorter
 
 See [design.md](design.md) for the link design built on these rules.
 
+## Possibly related devices (untested)
+
+Only the US3342 has been tested. The bridge is a Genesys Logic feature: the GL3590-S datasheet lists a "host bridge hardware
+engine" for keyboard/mouse applications and multiple upstream ports, so other vendors may ship the same silicon. These products
+advertise the same kind of feature (one keyboard and mouse across two computers, plus file transfer) and are the plausible
+candidates. Nothing public confirms their chip, USB IDs or protocol, so OpenATEN may not work with them.
+
+| Device | Why it is a candidate |
+|---|---|
+| Unitek U1344A / U1344ABK "USB 10Gbps KVM Hub" | Data-only two-host hub with "Data Intercopy" file transfer, needs a 5 Gbps+ host port; vendor driver is called "GlinkAPP" |
+| Unitek D1118A "USB C 10Gbps HDMI Split Screen KVM" | Same Data Intercopy feature, with video added |
+
+If you own one, run `lsusb -v` with both hosts connected and open an issue with the output. The signs of a match are a Genesys
+hub (`05e3:0625`/`0626`) with two upstream ports, an extra `05e3:0627`-style "USB Storage" device with a mass-storage plus HID
+interface, and an INQUIRY response carrying the vendor bytes described above. A different USB ID would need a code change, since
+`src/openaten/usb.py` matches only `05e3:0627`.
+
 ## Notes on the vendor software
 
 The vendor's Windows application was run in a QEMU/KVM VM with one bridge end passed through. As the *slave* it initialised

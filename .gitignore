@@ -14,3 +14,6 @@ htmlcov/
 .ruff_cache/
 .hypothesis/
 result
+
+# Rust core crate
+rust/target/

@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## Unreleased
 
+### Added
+- Rust core port (`rust/`, crate `openaten-core`): a standalone Rust reimplementation of the core daemon and CLI (wire protocol, reliable link, application protocols, config, `list`/`state`/`daemon`/`send`/`ctl`), 105 unit tests run with no hardware. The hardware-bound layer stays Python and plugs in through injected traits. See [docs/rust.md](docs/rust.md).
+
 ## 0.2.1 - 2026-10-19
 
 ### Fixed

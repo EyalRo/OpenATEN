@@ -44,6 +44,7 @@ The bridge device only appears when both upstream ports are connected.
 
 - **Roadmap and design**: [docs/design.md](docs/design.md). Done: the link layer, input forwarding and edge hand-off. Built but not yet run on hardware:
   clipboard sharing and file transfer ([docs/applications.md](docs/applications.md)). Open: Windows client, hardware verification.
+- **Rust core port**: [docs/rust.md](docs/rust.md) documents the standalone Rust reimplementation of the core daemon and CLI in [`rust/`](rust/).
 - **Tasks**: [GitHub issues](https://github.com/EyalRo/OpenATEN/issues). **Findings and how-tos**: the [wiki](https://github.com/EyalRo/OpenATEN/wiki).
 - **Reference docs** that ship with the code: [docs/](docs/) (protocol, hardware, setup, architecture, troubleshooting, decision records in `docs/adr/`).
 
