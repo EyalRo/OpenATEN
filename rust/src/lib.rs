@@ -15,6 +15,7 @@ pub mod link;
 pub mod log;
 pub mod protocol;
 pub mod transfer;
+pub mod usb;
 pub mod warp;
 
 #[cfg(test)]

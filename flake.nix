@@ -47,6 +47,7 @@
           src = ./rust;
           cargoLock.lockFile = ./rust/Cargo.lock;
           nativeBuildInputs = [ pkgs.pkg-config ];
+          buildInputs = [ pkgs.libusb1 ];
           meta.mainProgram = "openaten";
         };
         # Border strips (`openaten strip`): GTK4 + gtk4-layer-shell. gtk4-layer-shell must be preloaded before libwayland-client, so this
@@ -176,7 +177,7 @@
       });
       devShells = forAll (pkgs: {
         default = pkgs.mkShell {
-          packages = [ (pkgs.python3.withPackages (p: [ p.pyusb p.pytest p.evdev p.hypothesis ])) pkgs.libusb1 pkgs.cargo pkgs.rustc ];
+          packages = [ (pkgs.python3.withPackages (p: [ p.pyusb p.pytest p.evdev p.hypothesis ])) pkgs.libusb1 pkgs.cargo pkgs.rustc pkgs.pkg-config ];
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.libusb1 ];
           PYTHONPATH = "src";
         };
