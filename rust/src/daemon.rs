@@ -96,6 +96,10 @@ pub trait End {
     fn port(&self) -> String;
     fn hid(&mut self, report: &[u8]);
     fn close(&mut self);
+    /// Consume this end into a link transport so a `LinkSession` can drive it.
+    /// Hardware backends return `Some` (e.g. USB wraps the claimed device);
+    /// test doubles that have no real transport return `None`.
+    fn into_transport(self: Box<Self>) -> Option<Box<dyn crate::link::Transport + Send>>;
 }
 
 /// The persistent link session the daemon keeps running in role mode.
@@ -1114,6 +1118,9 @@ mod tests {
         }
         fn close(&mut self) {
             self.closed = true;
+        }
+        fn into_transport(self: Box<Self>) -> Option<Box<dyn crate::link::Transport + Send>> {
+            None
         }
     }
 

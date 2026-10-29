@@ -117,6 +117,23 @@ pub trait Transport {
     fn hid(&mut self, report: &[u8], timeout: f64) -> Result<(), errors::TransportError>;
 }
 
+/// Lets a boxed transport be used where a [`Transport`] is expected, so the
+/// daemon can hold a heterogeneous transport behind a trait object.
+impl Transport for Box<dyn Transport + Send> {
+    fn send(&mut self, data: &[u8], timeout: f64) -> Result<(), errors::TransportError> {
+        (**self).send(data, timeout)
+    }
+    fn recv(&mut self, size: usize, timeout: f64) -> Result<Vec<u8>, errors::TransportError> {
+        (**self).recv(size, timeout)
+    }
+    fn reset(&mut self) {
+        (**self).reset();
+    }
+    fn hid(&mut self, report: &[u8], timeout: f64) -> Result<(), errors::TransportError> {
+        (**self).hid(report, timeout)
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Chunk {
     channel: u32,

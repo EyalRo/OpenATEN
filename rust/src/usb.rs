@@ -33,9 +33,6 @@ const REQUEST_RESET: u8 = 0xFF;
 #[allow(dead_code)]
 const REQUEST_GET_MAX_LUN: u8 = 0xFE;
 
-/// Best-effort close of a resource (the Python original swallows USB errors on
-/// teardown, and so do we).
-
 /// Human-readable USB port path for a device (e.g. `"1.2.3"`), matching the
 /// Python `port_path()`.
 pub fn port_path(dev: &Device<Context>) -> String {
@@ -217,7 +214,7 @@ impl BridgeEnd {
         for _ in 0..4 {
             let mut csw = [0u8; 13];
             let n = self.handle.read_bulk(self.ep_in, &mut csw, timeout)?;
-            if n >= 13 && &csw[0..4] == &CSW_SIGNATURE {
+            if n >= 13 && csw[0..4] == CSW_SIGNATURE {
                 let rtag = u32::from_le_bytes(csw[4..8].try_into().unwrap());
                 if rtag == tag {
                     return Ok((csw[12], data));
@@ -408,6 +405,9 @@ impl crate::daemon::End for EndAdapter {
     }
     fn close(&mut self) {
         self.inner.close();
+    }
+    fn into_transport(self: Box<Self>) -> Option<Box<dyn crate::link::Transport + Send>> {
+        Some(Box::new(UsbTransport { end: self.inner }))
     }
 }
 
