@@ -39,6 +39,16 @@
           '';
           meta.mainProgram = "openaten-panel";
         };
+        # Rust core port (`openaten` Rust binary): the non-hardware core of OpenATEN, ported to Rust. Hardware seams (USB, evdev,
+        # uinput, netlink) are stubbed behind traits, so `cargo test` runs the 105-test suite with no hardware attached.
+        rust-core = pkgs.rustPlatform.buildRustPackage {
+          pname = "openaten-core";
+          version = (builtins.fromTOML (builtins.readFile ./rust/Cargo.toml)).package.version;
+          src = ./rust;
+          cargoLock.lockFile = ./rust/Cargo.lock;
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          meta.mainProgram = "openaten";
+        };
         # Border strips (`openaten strip`): GTK4 + gtk4-layer-shell. gtk4-layer-shell must be preloaded before libwayland-client, so this
         # lives in its own wrapper instead of slowing down the daemon.
         strip =
@@ -136,6 +146,7 @@
         # `nix flake check` only evaluates packages, so build the default one here: that runs the test suite inside the Nix build.
         package = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
         panel = self.packages.${pkgs.stdenv.hostPlatform.system}.panel;  # builds the tray app and runs its cargo tests
+        rust-core = self.packages.${pkgs.stdenv.hostPlatform.system}.rust-core;  # builds the Rust port and runs its cargo tests
         nixos-module-eval =
           let
             sys = nixpkgs.lib.nixosSystem {
@@ -165,7 +176,7 @@
       });
       devShells = forAll (pkgs: {
         default = pkgs.mkShell {
-          packages = [ (pkgs.python3.withPackages (p: [ p.pyusb p.pytest p.evdev p.hypothesis ])) pkgs.libusb1 ];
+          packages = [ (pkgs.python3.withPackages (p: [ p.pyusb p.pytest p.evdev p.hypothesis ])) pkgs.libusb1 pkgs.cargo pkgs.rustc ];
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.libusb1 ];
           PYTHONPATH = "src";
         };
